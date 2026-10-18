@@ -5,7 +5,11 @@ import { parseJsonc, setInJsonc, getInJsonc } from '../lib/jsonc.js';
 import * as fika from '../lib/fika.js';
 import * as launch from '../lib/launch.js';
 
-const ROOT = 'E:\\game\\EFT\\Client.0.16.9.0.40087';
+const ROOT = process.argv[2] || process.env.SPT_ROOT || 'E:\\game\\EFT\\Client.0.16.9.0.40087';
+if (!fs.existsSync(path.join(ROOT, 'SPT', 'SPT.Server.exe'))) {
+  console.log(`跳过：${ROOT} 不是 SPT 安装目录（用法：node tests\\fika-test.js <SPT 安装目录>）`);
+  process.exit(0);
+}
 let pass = 0;
 let fail = 0;
 function ok(cond, msg) {
