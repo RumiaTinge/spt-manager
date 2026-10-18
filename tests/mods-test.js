@@ -1,0 +1,13 @@
+import { scanMods } from '../lib/mods.js';
+const root = process.argv[2] || 'E:\\game\\EFT\\Client.0.16.9.0.40087';
+const t0 = Date.now();
+const r = scanMods(root, { spt: '4.0.13' });
+console.log(`scan took ${Date.now() - t0}ms`);
+const show = (arr) => arr.forEach((m) => console.log(`  [${m.enabled ? 'ON ' : 'OFF'}] ${m.displayName}  v${m.version || '?'}  guid=${m.guid || '-'}  spt=${m.sptRange || '-'}  deps=${m.deps.join(',') || '-'}  unresolved=${m.unresolvedDeps.join(',') || '-'}`));
+console.log(`server mods (${r.server.length}):`); show(r.server);
+console.log(`plugins (${r.plugins.length}):`); show(r.plugins);
+console.log(`patchers (${r.patchers.length}):`); show(r.patchers);
+console.log(`disabled server (${r.disabled.server.length}):`); show(r.disabled.server);
+console.log(`disabled plugins (${r.disabled.plugins.length}):`); show(r.disabled.plugins);
+console.log(`missing deps:`, JSON.stringify(r.missingDeps, null, 2));
+console.log(`known guids:`, r.knownGuids.join(', '));
