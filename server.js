@@ -16,6 +16,7 @@ import * as game from './lib/game.js';
 import * as fika from './lib/fika.js';
 import * as launch from './lib/launch.js';
 import * as pack from './lib/pack.js';
+import { EMBEDDED, readEmbedded, readDisk } from './lib/assets.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, 'public');
@@ -110,6 +111,21 @@ function requireRoot() {
 function serveStatic(req, res, urlPath) {
   let rel = decodeURIComponent(urlPath.replace(/^\/+/, ''));
   if (!rel || rel === '') rel = 'index.html';
+
+  // 打包成 exe 后前端资源内联在二进制里
+  if (EMBEDDED) {
+    const name = rel.replace(/\\/g, '/');
+    const buf = readEmbedded(name) || readEmbedded('index.html');
+    if (!buf) return sendError(res, 404, 'not found');
+    const ext = path.extname(name).toLowerCase();
+    res.writeHead(200, {
+      'content-type': MIME[ext] || MIME['.html'],
+      'cache-control': 'no-store',
+      'content-length': buf.length,
+    });
+    return res.end(req.method === 'HEAD' ? undefined : buf);
+  }
+
   const full = path.join(PUBLIC_DIR, rel);
   if (!full.startsWith(PUBLIC_DIR)) return sendError(res, 403, 'forbidden');
   fs.stat(full, (err, st) => {

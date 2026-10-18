@@ -1,20 +1,14 @@
 {
   "name": "spt-manager",
-  "version": "1.0.0",
-  "description": "SPT 4.x 本地网页管理器：模组、服务端、客户端、Fika 联机",
+  "version": "1.0.1",
+  "private": true,
+  "description": "SPT 4.x 本地模组管理器：模组安装、服务端与客户端启动、Fika 联机",
   "type": "module",
   "main": "server.js",
-  "license": "MIT",
-  "keywords": [
-    "spt",
-    "escape-from-tarkov",
-    "tarkov",
-    "mod-manager",
-    "fika"
-  ],
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/archive-test.js && node tests/mods-test.js && node tests/dllmeta-test.js && node tests/install-test.js && node tests/fika-test.js && node tests/pack-test.js && node tests/profile-test.js && node tests/launch-test.js && node tests/headless-mode-test.js"
+    "test": "node tests/archive-test.js && node tests/dllmeta-test.js && node tests/fika-test.js && node tests/headless-mode-test.js && node tests/install-test.js && node tests/launch-test.js && node tests/mods-test.js && node tests/pack-test.js && node tests/profile-test.js",
+    "build:exe": "node build/build-exe.mjs"
   },
   "engines": {
     "node": ">=18"

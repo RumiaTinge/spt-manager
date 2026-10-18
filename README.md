@@ -20,11 +20,28 @@ Node.js 18+，无需安装依赖。
 
 ## 快速开始
 
+### 方式一：直接跑 exe（推荐）
+
+1. 从 [Releases](https://github.com/RumiaTinge/spt-manager/releases/latest) 下载 `spt-manager.exe`
+2. 放到任意目录双击运行（约 92 MB，自带运行时，不用装 Node）
+3. 浏览器会自动打开 <http://127.0.0.1:7317>
+
+数据（备份、设置）写在 exe 同目录的 `data\` 下，整个文件夹可以随意搬。
+
+### 方式二：源码运行
+
 1. 安装 [Node.js](https://nodejs.org/) 18 或更高版本
 2. 双击 `启动器.bat`
 3. 打开 <http://127.0.0.1:7317>
 
 首次启动会自动探测 SPT 目录，也可以在「设置」里手动指定。端口用环境变量 `SPT_MANAGER_PORT` 修改。
+
+### 自己打包 exe
+
+```
+npm run build:exe     # 需要 bun（https://bun.sh），产物在 dist\spt-manager.exe
+```
+前端资源（index.html / app.js / styles.css）会被内联进二进制，单文件即可运行。
 
 ## 测试
 
