@@ -906,10 +906,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   const root = getSptRoot();
+  const packed = import.meta.url.includes('%7EBUN') || import.meta.url.includes('$bunfs');
   console.log('┌─────────────────────────────────────────────');
   console.log('│  SPT 模组管理器 & 服务器启动器');
   console.log(`│  http://${HOST}:${PORT}`);
   console.log(`│  SPT 目录: ${root || '（未设置，请在界面里选择）'}`);
+  console.log(`│  数据目录: ${DATA_DIR}`);
+  if (packed) console.log('│  关闭这个窗口 = 退出管理器');
   console.log('└─────────────────────────────────────────────');
   if (process.env.SPT_MANAGER_NO_OPEN !== '1') {
     try {
