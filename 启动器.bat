@@ -7,7 +7,7 @@ if errorlevel 1 goto nonode
 
 echo.
 echo   正在启动 SPT 模组管理器...
-echo   界面地址: http://127.0.0.1:7317
+echo   界面地址: http://127.0.0.1:47823
 echo   关闭这个窗口即可停止管理器。
 echo.
 node server.js

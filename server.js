@@ -1,31 +1,60 @@
 // server.js — SPT 模组管理器 & 服务器启动器（零依赖 Node HTTP 服务）
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// Windows 控制台默认 936(GBK)，而 Node/Bun 输出的是 UTF-8，中文会变成乱码。
+// 把控制台代码页切成 65001（控制台是共享对象，子进程设置对父进程同样生效）。
+if (process.platform === 'win32') {
+  try { spawnSync('cmd.exe', ['/c', 'chcp 65001 >nul'], { windowsHide: true, stdio: 'ignore' }); } catch { /* 忽略 */ }
+}
+
 import {
-  APP_DIR, DATA_DIR, ensureDirs, readSettings, writeSettings, getSptRoot, getVersions,
+  APP_DIR, DATA_DIR, DATA_DIR_FALLBACK, ensureDirs, readSettings, writeSettings, getSptRoot, getVersions,
   isValidSptRoot, autoDetectSptRoot, readJson, writeJson, nowStamp, humanSize,
 } from './lib/core.js';
 import { scanMods, toggleMod, deleteMod } from './lib/mods.js';
 import { listArchive, analyzePackage, extractToTemp, installFromTemp } from './lib/archive.js';
 import * as forge from './lib/forge.js';
 import * as game from './lib/game.js';
+import * as aiRules from './lib/aiRules.js';
 import * as fika from './lib/fika.js';
 import * as launch from './lib/launch.js';
 import * as pack from './lib/pack.js';
+import * as bundled from './lib/bundled.js';
+import * as live from './lib/live.js';
+import * as raidProbe from './lib/raidprobe.js';
+import * as items from './lib/items.js';
 import { EMBEDDED, readEmbedded, readDisk } from './lib/assets.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, 'public');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
-const PORT = Number(process.env.SPT_MANAGER_PORT || 7317);
+const PORT = Number(process.env.SPT_MANAGER_PORT || 47823);
 const HOST = '127.0.0.1';
 
 ensureDirs();
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// 控制台输出同时写一份到 data\manager.log（远程排障时让对方把这个文件发过来）
+const LOG_FILE = path.join(DATA_DIR, 'manager.log');
+try {
+  const st = fs.statSync(LOG_FILE);
+  if (st.size > 2 * 1024 * 1024) fs.renameSync(LOG_FILE, LOG_FILE + '.old');
+} catch { /* 第一次运行没有日志 */ }
+const rawLog = console.log.bind(console);
+const rawErr = console.error.bind(console);
+const tee = (fn) => (...args) => {
+  try { fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map((a) => (typeof a === 'string' ? a : String(a))).join(' ')}\n`); } catch { /* 写日志失败不影响运行 */ }
+  fn(...args);
+};
+console.log = tee(rawLog);
+console.error = tee(rawErr);
+process.on('uncaughtException', (e) => { rawErr('\n未捕获的错误：', e); process.exitCode = 1; });
+process.on('unhandledRejection', (e) => { rawErr('\n未处理的 Promise 拒绝：', e); process.exitCode = 1; });
 
 // ---------------------------------------------------------------- 任务系统（长耗时操作进度轮询）
 const jobs = new Map();
@@ -444,6 +473,50 @@ route('GET', /^\/api\/server\/log$/, async (ctx) => {
   return { ok: true, ...game.serverLog(root, n) };
 });
 
+// ---- 战局实测：服务端 NoAIBots 决策 vs 客户端真正刷出的 AI
+route('GET', /^\/api\/raid\/compare$/, async () => {
+  const root = requireRoot();
+  return { ok: true, ...raidProbe.compare(root) };
+});
+
+// ---- 局内测试：让客户端插件就地击杀 AI（kill all/scav/pmc/boss）
+route('POST', /^\/api\/raid\/kill$/, async (ctx) => {
+  const root = requireRoot();
+  const body = await readJsonBody(ctx.req);
+  const scope = ['all', 'scav', 'pmc', 'boss'].includes(body.scope) ? body.scope : 'all';
+  const sent = raidProbe.sendLiveCommand(root, { action: 'kill', scope });
+  if (!sent.ok) return { ok: false, error: sent.error };
+  return { ok: true, ...sent };
+});
+
+// ---- 局内测试：读插件回执（command-result.json）
+route('GET', /^\/api\/raid\/kill\/result$/, async () => {
+  const root = requireRoot();
+  return { ok: true, result: raidProbe.liveCommandResult(root) };
+});
+
+// ---- 实时窗口：服务端 / 无头主机 / NoAIBots 各看各的
+route('GET', /^\/api\/live\/panes$/, async (ctx) => {
+  const n = Math.min(600, Math.max(40, Number(ctx.url.searchParams.get('n') || 200)));
+  const root = getSptRoot();
+  const settings = readSettings();
+  return {
+    ok: true,
+    n,
+    at: new Date().toISOString(),
+    server: root ? live.serverPane(root, n) : null,
+    headless: root ? live.headlessPanes(root, settings, n) : [],
+    ai: root ? live.aiPane(root, n) : { kind: 'ai', lines: [], matched: 0 },
+    quickEdit: live.quickEditEnabled(),
+  };
+});
+
+route('POST', /^\/api\/live\/quickedit$/, async (ctx) => {
+  const body = await readJsonBody(ctx.req);
+  const want = body.enabled !== false ? false : true; // 默认动作是“关闭快速编辑”
+  return { ok: true, ...live.setQuickEdit(want), enabled: want };
+});
+
 // ---- AI / 战局配置
 route('GET', /^\/api\/ai$/, async () => {
   const root = requireRoot();
@@ -462,6 +535,91 @@ route('POST', /^\/api\/ai\/boss$/, async (ctx) => {
   const { map, index, patch } = await readJsonBody(ctx.req);
   const r = game.writeBossConfig(root, map, index, patch || {});
   return { ok: true, ...r };
+});
+
+// ---- AI 规则（NoAIBots 服务器 mod）
+route('GET', /^\/api\/ai\/rules$/, async () => {
+  const root = requireRoot();
+  return { ok: true, ...aiRules.readRules(root), defaults: aiRules.defaultConfig(), catalog: aiRules.RULE_CATALOG, actionDefs: aiRules.ACTION_DEFS, actionGroups: aiRules.ACTION_GROUPS, amountLabels: aiRules.BOT_AMOUNT_LABEL, mapDefaults: aiRules.mapDefaults(root), spawn: aiRules.spawnData(root), pmcInfo: aiRules.pmcInfo(root), commonSkills: aiRules.COMMON_SKILLS };
+});
+
+route('POST', /^\/api\/ai\/rules$/, async (ctx) => {
+  const root = requireRoot();
+  const body = await readJsonBody(ctx.req);
+  const r = aiRules.writeRules(root, body && body.config ? body.config : body);
+  return { ok: true, ...r };
+});
+
+// 只保存一条规则：不会把其他卡片里未保存的编辑一起写进去
+route('POST', /^\/api\/ai\/rules\/rule$/, async (ctx) => {
+  const root = requireRoot();
+  const { index, rule } = await readJsonBody(ctx.req);
+  const r = aiRules.writeRule(root, index, rule);
+  return { ok: true, ...r };
+});
+
+// 只保存 PMC 档案：不动规则列表
+route('POST', /^\/api\/ai\/rules\/pmc$/, async (ctx) => {
+  const root = requireRoot();
+  const body = await readJsonBody(ctx.req);
+  const r = aiRules.writePmcProfile(root, body && body.pmcProfile ? body.pmcProfile : body);
+  return { ok: true, ...r };
+});
+
+route('POST', /^\/api\/ai\/rules\/preview$/, async (ctx) => {
+  const root = requireRoot();
+  const { config, scenario } = await readJsonBody(ctx.req);
+  const r = aiRules.previewRules(root, config, scenario || {});
+  return { ok: true, ...r };
+});
+
+route('POST', /^\/api\/ai\/rules\/restore$/, async (ctx) => {
+  const root = requireRoot();
+  const { name } = await readJsonBody(ctx.req);
+  const r = aiRules.restoreBackup(root, name);
+  return { ok: true, ...r };
+});
+
+// ---- 物品效果（直接改数据库模板，改前自动备份）
+route('GET', /^\/api\/items\/backups$/, async () => {
+  const root = requireRoot();
+  return { ok: true, list: items.listDbBackups(root) };
+});
+
+route('POST', /^\/api\/items\/restore$/, async (ctx) => {
+  const root = requireRoot();
+  const { name } = await readJsonBody(ctx.req);
+  return { ok: true, ...items.restoreDbBackup(root, name) };
+});
+
+route('GET', /^\/api\/items$/, async (ctx) => {
+  const root = requireRoot();
+  const q = ctx.url.searchParams.get('q') || '';
+  const limit = Number(ctx.url.searchParams.get('limit') || 40);
+  return { ok: true, ...items.searchItems(root, q, limit) };
+});
+
+route('GET', /^\/api\/items\/([0-9a-zA-Z_-]+)$/, async (ctx) => {
+  const root = requireRoot();
+  return { ok: true, item: items.readItem(root, ctx.matches[1]) };
+});
+
+route('POST', /^\/api\/items\/([0-9a-zA-Z_-]+)$/, async (ctx) => {
+  const root = requireRoot();
+  const body = await readJsonBody(ctx.req);
+  return { ok: true, item: items.writeItem(root, ctx.matches[1], (body && body.patch) || {}) };
+});
+
+route('GET', /^\/api\/buffs$/, async () => {
+  const root = requireRoot();
+  const cat = items.buffCatalog(root);
+  return { ok: true, loopTime: cat.loopTime, path: cat.path, groups: cat.groups };
+});
+
+route('POST', /^\/api\/buffs\/([0-9a-zA-Z_]+)$/, async (ctx) => {
+  const root = requireRoot();
+  const body = await readJsonBody(ctx.req);
+  return { ok: true, group: items.writeBuffGroup(root, ctx.matches[1], (body && body.entries) || []) };
 });
 
 // ---- 物资
@@ -559,6 +717,19 @@ route('POST', /^\/api\/profiles\/remove$/, async (ctx) => {
   return { ok: true, ...r };
 });
 
+// ---- 内置基础模组（关于页）
+route('GET', /^\/api\/bundled$/, async () => {
+  const root = getSptRoot();
+  return { ok: true, embedded: bundled.BUNDLED_EMBEDDED, items: bundled.bundleStatus(root) };
+});
+
+route('POST', /^\/api\/bundled\/install$/, async (ctx) => {
+  const root = requireRoot();
+  const body = await readJsonBody(ctx.req);
+  const r = bundled.installBundle(root, String(body.id || ''));
+  return { ...r, items: bundled.bundleStatus(root) };
+});
+
 // ---- Fika 联机
 route('GET', /^\/api\/fika$/, async () => {
   const root = requireRoot();
@@ -570,6 +741,7 @@ route('GET', /^\/api\/fika$/, async () => {
     ok: true,
     status,
     serverConfig: server.ok ? server.config : null,
+    serverExists: !!server.exists,
     serverError: server.ok ? null : server.error,
     serverFile: fika.fikaPaths(root).serverConfig,
     clientFile: fika.fikaPaths(root).clientCfg,
@@ -885,7 +1057,35 @@ route('GET', /^\/api\/jobs\/([\w]+)$/, async (ctx) => {
 });
 
 // ---------------------------------------------------------------- 启动
-const server = http.createServer(async (req, res) => {
+const PACKED_RUNTIME = import.meta.url.includes('%7EBUN') || import.meta.url.includes('$bunfs');
+
+function openBrowser(port) {
+  if (process.env.SPT_MANAGER_NO_OPEN === '1') return;
+  try {
+    spawn('cmd.exe', ['/c', 'start', '', `http://${HOST}:${port}`], { windowsHide: true, detached: true, stdio: 'ignore' }).unref();
+  } catch { /* 打开浏览器失败不影响服务 */ }
+}
+
+/** 这个端口上是不是已经有一个管理器在跑 */
+function managerAt(port, timeout = 800) {
+  return new Promise((resolve) => {
+    const req = http.get({ host: HOST, port, path: '/api/state', timeout }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (d) => { if (body.length < 4096) body += d; });
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(body);
+          resolve(!!(j && j.ok && j.settings));
+        } catch { resolve(false); }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
+  });
+}
+
+const handler = async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || HOST}`);
   try {
     if (url.pathname.startsWith('/api/')) {
@@ -902,23 +1102,89 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     if (!res.writableEnded) sendError(res, 500, String(e && e.message ? e.message : e));
   }
-});
+};
 
-server.listen(PORT, HOST, () => {
-  const root = getSptRoot();
-  const packed = import.meta.url.includes('%7EBUN') || import.meta.url.includes('$bunfs');
-  console.log('┌─────────────────────────────────────────────');
-  console.log('│  SPT 模组管理器 & 服务器启动器');
-  console.log(`│  http://${HOST}:${PORT}`);
-  console.log(`│  SPT 目录: ${root || '（未设置，请在界面里选择）'}`);
-  console.log(`│  数据目录: ${DATA_DIR}`);
-  if (packed) console.log('│  关闭这个窗口 = 退出管理器');
-  console.log('└─────────────────────────────────────────────');
-  if (process.env.SPT_MANAGER_NO_OPEN !== '1') {
-    try {
-      spawn('cmd.exe', ['/c', 'start', '', `http://${HOST}:${PORT}`], { windowsHide: true, detached: true, stdio: 'ignore' }).unref();
-    } catch { /* 打开浏览器失败不影响服务 */ }
+let server = null;
+
+function banner(root, port) {
+  const line = '='.repeat(52);
+  console.log(line);
+  console.log('  SPT 模组管理器 & 服务器启动器');
+  console.log(`  地址：http://${HOST}:${port}`);
+  console.log(`  SPT 目录：${root || '（未设置，请在界面里选择）'}`);
+  console.log(`  数据目录：${DATA_DIR}${DATA_DIR_FALLBACK ? '（exe 目录不可写，已放到用户目录）' : ''}`);
+  if (PACKED_RUNTIME) console.log('  关闭这个窗口 = 退出管理器');
+  console.log(line);
+}
+
+/** 端口是不是空的（能绑定就算空） */
+function portFree(port) {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', () => resolve(false));
+    probe.once('listening', () => probe.close(() => resolve(true)));
+    probe.listen(port, HOST);
+  });
+}
+
+/** 先问系统要一个能用的端口，再建服务（不复用失败的 server 对象，避免监听状态残留） */
+async function pickPort(start, tries) {
+  for (let i = 0; i < tries; i++) {
+    const port = start + i;
+    if (await portFree(port)) return port;
+    console.log(`端口 ${port} 被别的程序占用了，试 ${port + 1}…`);
   }
-});
+  return null;
+}
+
+function listenOn(port) {
+  return new Promise((resolve, reject) => {
+    server = http.createServer(handler);
+    server.once('error', reject);
+    server.once('listening', () => resolve(server.address().port));
+    server.listen(port, HOST);
+  });
+}
+
+async function fail(err) {
+  console.error(`\n启动失败：${err && err.message ? err.message : err}`);
+  console.error(`日志文件：${path.join(DATA_DIR, 'manager.log')}`);
+  if (PACKED_RUNTIME) {
+    console.error('按回车键关闭窗口…');
+    try {
+      process.stdin.resume();
+      await new Promise((r) => process.stdin.once('data', r));
+    } catch { /* 忽略 */ }
+  }
+  process.exit(1);
+}
+
+const requested = Number(process.env.SPT_MANAGER_PORT || 0) || PORT;
+
+// 默认端口上已经开着管理器 → 直接把浏览器指过去，别报错
+const existing = await managerAt(requested);
+if (existing) {
+  console.log(`管理器已经在 http://${HOST}:${requested} 运行，直接打开它。`);
+  console.log('要再开一个，可以设置环境变量 SPT_MANAGER_PORT=其他端口。');
+  openBrowser(requested);
+  setTimeout(() => process.exit(0), 800);
+} else {
+  const port = await pickPort(requested, 20);
+  if (!port) {
+    await fail(new Error(`端口 ${requested}–${requested + 19} 都被占用了，可以设置环境变量 SPT_MANAGER_PORT 换个端口`));
+  } else {
+    try {
+      const actual = await listenOn(port);
+      if (actual !== requested) console.log(`（默认端口 ${requested} 被占用，已改用 ${actual}）`);
+      banner(getSptRoot(), actual);
+      // 无头 / 服务端窗口只要被鼠标点一下就会冻住（快速编辑模式），新开的控制台默认关掉它
+      const qe = live.ensureQuickEditOff();
+      if (qe.changed) console.log('  已关闭控制台「快速编辑」：误点无头 / 服务端窗口不会再卡住（重新打开的窗口生效）');
+      openBrowser(actual);
+    } catch (e) {
+      await fail(e);
+    }
+  }
+}
 
 process.on('SIGINT', () => { server.close(() => process.exit(0)); });

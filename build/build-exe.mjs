@@ -16,6 +16,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
 const OUT_DIR = path.join(ROOT, 'dist');
 const TOKEN_FILE = path.join(ROOT, 'build', 'embedded-assets.js');
+const BUNDLE_DIR = path.join(ROOT, 'assets', 'bundled');
+const BUNDLE_TOKEN = path.join(ROOT, 'build', 'embedded-bundled.js');
 const EXE = path.join(OUT_DIR, 'spt-manager.exe');
 
 const ASSETS = ['index.html', 'app.js', 'styles.css'];
@@ -48,6 +50,32 @@ function generateAssets() {
   console.log(`[1/2] 内联 ${ASSETS.length} 个前端文件 → ${path.relative(ROOT, TOKEN_FILE)}（${kb} KB）`);
 }
 
+// 把 assets/bundled 下的基础模组（Fika 客户端/服务端/无头主机）也内联进 exe
+function generateBundled() {
+  const map = {};
+  let bytes = 0;
+  const walk = (rel) => {
+    const full = path.join(BUNDLE_DIR, rel);
+    if (!fs.existsSync(full)) return;
+    const st = fs.statSync(full);
+    if (st.isDirectory()) {
+      for (const name of fs.readdirSync(full)) walk(rel ? `${rel}/${name}` : name);
+      return;
+    }
+    const buf = fs.readFileSync(full);
+    map[rel] = buf.toString('base64');
+    bytes += buf.length;
+  };
+  walk('');
+  const body = [
+    '// 本文件由 build/build-exe.mjs 生成，请勿手改。',
+    `export default ${JSON.stringify(map)};`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(BUNDLE_TOKEN, body, 'utf8');
+  console.log(`[1/2] 内联 ${Object.keys(map).length} 个内置模组文件（${(bytes / 1024 / 1024).toFixed(2)} MB）`);
+}
+
 function compile() {
   const bun = findBun();
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -68,4 +96,5 @@ function compile() {
 }
 
 generateAssets();
+generateBundled();
 compile();
