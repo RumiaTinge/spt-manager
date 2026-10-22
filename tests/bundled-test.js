@@ -16,13 +16,13 @@ const root = path.join(tmp, 'client');
 fs.mkdirSync(path.join(root, 'SPT', 'SPT_Data'), { recursive: true });
 fs.writeFileSync(path.join(root, 'SPT', 'SPT.Server.exe'), '');
 
-ok('清单里有三个内置模组', () => {
+ok('清单里有五个内置模组', () => {
   const m = bundleManifest();
-  assert.equal(m.items.length, 4, `实际 ${m.items.length}`);
-  assert.deepEqual(m.items.map((i) => i.id).sort(), ['fika-client', 'fika-headless', 'fika-server', 'raidprobe-client']);
+  assert.equal(m.items.length, 5, `实际 ${m.items.length}`);
+  assert.deepEqual(m.items.map((i) => i.id).sort(), ['fika-client', 'fika-headless', 'fika-server', 'noaibots', 'raidprobe-client']);
 });
 
-ok('资源文件都在（fika-client 9 个、fika-server 50+、headless 2 个、raidprobe 1 个）', () => {
+ok('资源文件都在（fika-client 9 个、fika-server 50+、headless 2 个、raidprobe 1 个、noaibots 2 个）', () => {
   const st = bundleStatus(root);
   const by = Object.fromEntries(st.map((x) => [x.id, x]));
   assert.equal(by['fika-client'].files, 9);
@@ -30,6 +30,9 @@ ok('资源文件都在（fika-client 9 个、fika-server 50+、headless 2 个、
   assert.equal(by['fika-headless'].files, 2);
   assert.equal(by['raidprobe-client'].files, 1);
   assert.equal(by['raidprobe-client'].version, '0.3.0');
+  assert.equal(by['noaibots'].files, 2);
+  assert.equal(by['noaibots'].version, '1.5.3');
+  assert.equal(by['noaibots'].group, 'AI');
   assert.ok(by['fika-client'].size > 1024 * 1024);
 });
 
@@ -88,6 +91,27 @@ ok('客户端插件 raidprobe-client 装到 BepInEx/plugins/RaidProbe', () => {
   const st = bundleStatus(root).find((x) => x.id === 'raidprobe-client');
   assert.equal(st.installed, true);
   assert.equal(st.installedVersion, '0.3.0');
+  assert.equal(st.outdated, false);
+});
+
+ok('noaibots 装到服务端 mods 目录且不覆盖已有 config.json', () => {
+  const cfgDir = path.join(root, 'SPT', 'user', 'mods', 'NoAIBots');
+  fs.mkdirSync(cfgDir, { recursive: true });
+  const mine = JSON.stringify({ enabled: true, rules: [{ name: '我的规则' }] }, null, 2);
+  fs.writeFileSync(path.join(cfgDir, 'config.json'), mine);
+  const before = fs.readFileSync(path.join(cfgDir, 'config.json'), 'utf8');
+
+  const r = installBundle(root, 'noaibots');
+  assert.equal(r.files, 2);
+  const dll = path.join(cfgDir, 'NoAIBots.dll');
+  assert.ok(fs.existsSync(dll), '缺少 NoAIBots.dll');
+  assert.ok(fs.existsSync(path.join(cfgDir, 'README.md')), '缺少 README.md');
+  assert.equal(fs.readFileSync(path.join(cfgDir, 'config.json'), 'utf8'), before, 'config.json 被覆盖了');
+  assert.equal(fs.readFileSync(dll).subarray(0, 2).toString(), 'MZ', 'dll 不是 PE 文件');
+
+  const st = bundleStatus(root).find((x) => x.id === 'noaibots');
+  assert.equal(st.installed, true);
+  assert.equal(st.installedVersion, '1.5.3');
   assert.equal(st.outdated, false);
 });
 

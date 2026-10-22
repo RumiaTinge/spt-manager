@@ -43,6 +43,8 @@ const root1 = makeRoot(
     cli('Updated marksman bot Пётр to use: marksman brain'),
     cli('Updated spt bot Семён: pmcBEAR to use: pmcBEAR brain'),
     cli('Updated player scav bot to use: assault brain'),
+    cli('[SPT.CUSTOM] [CUSTOMAIPATCH] : bot: Буян type: bossBully lacked BossLogic, generating'),
+    cli('[SPT.CUSTOM] [CUSTOMAIPATCH] : bot: Кузьма type: followerBully lacked BossLogic, generating'),
   ],
 );
 
@@ -63,7 +65,9 @@ ok(r1.client.counts.scav === 2, '普通 Scav 2 只（assault + marksman）');
 ok(r1.client.counts.pmc === 1, 'PMC 1 只（spt bot 带类型）');
 ok(r1.client.counts.playerScav === 1, '玩家 Scav 1 只');
 ok(r1.client.counts.other === 0, '没有落进 other 的 bot');
-ok(r1.client.total === 4, '进场总数 = 4');
+ok(r1.client.counts.boss === 1, '首领 1 只（来自 CUSTOMAIPATCH 行）');
+ok(r1.client.counts.follower === 1, '随从 1 只（follower 类型）');
+ok(r1.client.total === 6, '进场总数 = 6');
 ok(r1.notes.some((n) => n.includes('零改动')), '提示：命中的规则都是零改动');
 ok(!r1.notes.some((n) => n.includes('算出的上限')), '上限一致时不提示矛盾');
 

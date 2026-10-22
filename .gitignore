@@ -3,5 +3,6 @@ data/
 # 打包产物
 dist/
 build/embedded-assets.js
+build/embedded-bundled.js
 node_modules/
 *.log

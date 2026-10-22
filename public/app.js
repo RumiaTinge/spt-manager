@@ -156,6 +156,7 @@ function setPage(page) {
   state.page = page;
   if (state.liveTimer) { clearInterval(state.liveTimer); state.liveTimer = null; }
   if (state.raidTimer) { clearInterval(state.raidTimer); state.raidTimer = null; }
+  if (state.clientTimer) { clearInterval(state.clientTimer); state.clientTimer = null; }
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   render();
 }
@@ -1675,6 +1676,7 @@ function renderAiRulesSection(aiData, rulesData) {
       numField(rule, 'botStart', '开局开始刷（秒）', '10'),
       numField(rule, 'botStop', '开局停止刷（秒）', '60'),
       numField(rule, 'maxBotPerZone', '单区域同屏上限', '1'),
+      numField(rule, 'botMax', '新系统存活上限（BotMax）', '1'),
       numField(rule, 'nonWaveSpawnBotsLimitPerPlayer', '非波次补刷/玩家上限', '1'),
       numField(rule, 'distToActivate', '激活距离（米）', '10'),
       numField(rule, 'distToSleep', '休眠距离（米）', '10'),
@@ -1688,7 +1690,7 @@ function renderAiRulesSection(aiData, rulesData) {
       triSelect(rule, 'offlineNewSpawn', '离线局：新刷新系统'),
       triSelect(rule, 'offlineOldSpawn', '离线局：旧刷新系统')),
     h('div', { class: 'hint', style: 'margin-top:8px' },
-      `提示：以海关原版为例，检查间隔 ${defaultMaps.bigmap?.botSpawnPeriodCheck ?? 15}s、激活 ${defaultMaps.bigmap?.distToActivate ?? 265}m、休眠 ${defaultMaps.bigmap?.distToSleep ?? 300}m、单区域同屏 ${defaultMaps.bigmap?.maxBotPerZone ?? 4}；把“非波次补刷/玩家上限”设 0 可以堵掉 new spawn 的临场补刷。`));
+      `提示：以海关原版为例，检查间隔 ${defaultMaps.bigmap?.botSpawnPeriodCheck ?? 15}s、激活 ${defaultMaps.bigmap?.distToActivate ?? 265}m、休眠 ${defaultMaps.bigmap?.distToSleep ?? 300}m、新系统存活上限 ${defaultMaps.bigmap?.botMax ?? 26}。压 scav 最有效的是「新系统存活上限（BotMax）」：设 10 就只补到 10 只；「单区域同屏上限」只作用于按区域的刷新路径，管不住成波补刷。`));
 
   // ---- 刷新时间轴：按「这张地图的原版数据 + 本规则」画出这局 AI 什么时候来、大概来多少
   const spawnMaps = (rulesData && rulesData.spawn && rulesData.spawn.maps) || {};
@@ -2071,7 +2073,7 @@ function renderAiRulesSection(aiData, rulesData) {
           pmcNum(row, 'chance', 0, 100, 74),
           h('span', { class: 'sub' }, '%'),
           pmcNum(row, 'escort', 1, 30, 64),
-          h('span', { class: 'sub' }, '人/队(含队长)'),
+          h('span', { class: 'sub', title: '填 1 = 只有队长（首领）本人，没有随从；填 3 = 队长 + 2 个随从' }, '人/队(含队长)'),
           isBoss ? zoneInput : null,
           h('button', {
             class: 'btn sm danger', onclick: () => {
@@ -2089,12 +2091,22 @@ function renderAiRulesSection(aiData, rulesData) {
       class: 'btn sm primary', onclick: async (e) => {
         e.target.disabled = true;
         try {
-          const saved = await POST('/api/ai/rules/rule', { index, rule: JSON.parse(JSON.stringify(rule)) });
-          if (saved && saved.config && Array.isArray(saved.config.rules) && saved.config.rules[index]) {
-            cfg.rules[index] = saved.config.rules[index];
+          const saved = await POST('/api/ai/rules/rule', { index, total: cfg.rules.length, rule: JSON.parse(JSON.stringify(rule)) });
+          if (saved && saved.config && Array.isArray(saved.config.rules)) {
+            const savedRule = saved.rule || (saved.appended ? saved.config.rules[saved.config.rules.length - 1] : saved.config.rules[index]);
+            if (savedRule) {
+              // 追加保存时本地列表里已经有这条（只是还没落盘），按返回的序号覆盖而不是 push，避免出现重复卡片
+              if (Number.isInteger(saved.index) && saved.index >= 0 && saved.index < cfg.rules.length) {
+                cfg.rules[saved.index] = savedRule;
+              } else {
+                cfg.rules.push(savedRule);
+              }
+            }
           }
-          status.textContent = `规则 ${index + 1} 已单独保存 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })} · 下一局开战自动生效`;
-          toast(`规则 ${index + 1} 已保存（其他规则未改动）`, 'ok');
+          const label = saved && saved.appended ? `规则 ${(saved.index ?? cfg.rules.length - 1) + 1} 已追加保存` : `规则 ${index + 1} 已单独保存`;
+          status.textContent = `${label} ${new Date().toLocaleTimeString('zh-CN', { hour12: false })} · 下一局开战自动生效`;
+          toast(saved && saved.appended ? '新规则已追加保存' : '规则已保存（其他规则未改动）', 'ok');
+          if (saved && saved.appended) refreshList();
           try { const fresh = await GET('/api/ai/rules'); fillBackups(fresh.backups); } catch { /* 忽略 */ }
         } catch (err) { toast(String(err.message || err), 'err'); }
         finally { e.target.disabled = false; }
@@ -2170,7 +2182,7 @@ function renderAiRulesSection(aiData, rulesData) {
                 refreshDerived();
               },
             }, '+ 添加首领档位'),
-            h('span', { class: 'hint' }, '时间单位秒；PMC 行替换原版 PMC 档位，首领行替换该首领原有刷新点（最多 24 行）；首领下拉只列当前匹配地图原版有的首领'))),
+            h('span', { class: 'hint' }, '时间单位秒；PMC 行替换原版 PMC 档位，首领行替换该首领原有刷新点（最多 24 行）；首领下拉只列当前匹配地图原版有的首领；「人/队」含队长：填 1 = 只有首领本人、没有随从，填 3 = 首领 + 2 个随从（随从类型取该图原版模板，如 followerBully）'))),
         advancedSection(rule),
       ),
     );
@@ -2290,6 +2302,55 @@ function renderAiRulesSection(aiData, rulesData) {
   const logSwitch = boolSwitch('记录删除日志', () => cfg.logRemovals !== false, (v) => { cfg.logRemovals = v; });
 
   const installed = !!rulesData.installed;
+
+  // 随管理器一起发布的内置安装包（不需要另外下载 NoAIBots）
+  const bundle = rulesData.bundle || null;
+  let bundleRow = null;
+  if (bundle && bundle.version) {
+    const btn = h('button', { class: 'btn sm primary', style: 'flex-shrink:0' },
+      bundle.installed ? (bundle.outdated ? `更新到 v${bundle.version}` : '重新安装内置版本') : `安装内置 v${bundle.version}`);
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const old = btn.textContent;
+      btn.textContent = '安装中…';
+      let stopped = false;
+      try {
+        const st = await GET('/api/server/status', { silent: true });
+        if (st && st.running) {
+          if (!confirm(`更新 NoAIBots 需要重启 SPT 服务端（会结束当前战局）。\n\n现在停服安装吗？`)) {
+            btn.disabled = false;
+            btn.textContent = old;
+            return;
+          }
+          await POST('/api/server/stop');
+          stopped = true;
+        }
+        const r = await POST('/api/bundled/install', { id: 'noaibots' });
+        toast(`已装内置 NoAIBots v${bundle.version}（${r.files} 个文件${r.backup ? '，旧文件已备份' : ''}），config.json 里的规则保留`, 'ok', 6000);
+        if (stopped) {
+          await POST('/api/server/start');
+          toast('服务端已重新启动，下一局生效', 'ok', 4000);
+        }
+        await render();
+      } catch (e) {
+        toast(String((e && e.message) || e), 'err', 6000);
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
+    const tag = bundle.installed
+      ? (bundle.outdated
+        ? h('span', { class: 'tag warn' }, `已装 ${bundle.installedVersion || '旧版'}，内置 ${bundle.version}`)
+        : h('span', { class: 'tag ok' }, `内置包已安装 v${bundle.version}`))
+      : h('span', { class: 'tag' }, `内置包 v${bundle.version} 未安装`);
+    bundleRow = h('div', { class: 'row', style: 'margin-top:10px;align-items:center;gap:10px' },
+      h('div', { style: 'flex:1;min-width:240px' },
+        h('div', {}, h('b', {}, '内置安装包'), ' ', tag),
+        h('div', { class: 'hint', style: 'margin:2px 0 0' },
+          `随管理器一起发布：点一下就能装/更新 NoAIBots.dll+README（${bundle.files} 个文件 · ${humanSize(bundle.size)}），不会覆盖你的 config.json 规则。`)),
+      btn);
+  }
+
   refreshList();
 
   return h('div', { class: 'card', style: 'margin-top:16px' },
@@ -2300,6 +2361,7 @@ function renderAiRulesSection(aiData, rulesData) {
         h('span', { class: 'sub' }, `config.json ${rulesData.configMtime ? '更新于 ' + fmtTime(rulesData.configMtime) : '尚未创建'}`))),
     h('div', { class: 'hint' }, '规则在每局开战时由服务端执行：保存后无需重启服务端，下一局自动生效（mod 按文件时间热重载）。'),
     h('div', { class: 'hint mono', style: 'margin-top:4px;word-break:break-all' }, rulesData.configPath || ''),
+    bundleRow,
     rulesData.parseError ? h('div', { class: 'hint', style: 'color:var(--warn);margin-top:6px' }, rulesData.parseError) : null,
     rulesData.clientServerRemote ? h('div', { class: 'hint', style: 'color:var(--warn);margin-top:6px' },
       `当前客户端连的是远程服务端 ${rulesData.clientServerUrl}：本页只改本机这份配置，真正生效要让服务端那台机器装同一个 mod 并改那里的 config.json。`,
@@ -2432,6 +2494,7 @@ async function renderAiParams() {
     ['botStart', '开局多少秒开始刷'],
     ['botStop', '开局多少秒停止刷'],
     ['maxBotPerZone', '单区域同屏上限'],
+    ['botMax', '新系统存活上限（BotMax）'],
     ['nonWaveSpawnBotsLimitPerPlayer', '非波次补刷/玩家上限'],
     ['distToActivate', '激活距离（米）'],
     ['distToSleep', '休眠距离（米）'],
@@ -2716,7 +2779,7 @@ async function renderSettings() {
 }
 
 // ---------------------------------------------------------------- 关于
-const BUNDLE_GROUP_ORDER = ['联机', '实测', '基础', '其它'];
+const BUNDLE_GROUP_ORDER = ['联机', 'AI', '实测', '基础', '其它'];
 
 async function renderAbout() {
   const st = state.app = await GET('/api/state');
@@ -2812,7 +2875,7 @@ async function renderAbout() {
     h('div', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, '版本信息')),
       h('dl', { class: 'kv' },
-        h('dt', {}, '管理器'), h('dd', {}, '1.0.2'),
+        h('dt', {}, '管理器'), h('dd', {}, '1.0.3'),
         h('dt', {}, 'SPT'), h('dd', {}, v.spt || '未知'),
         h('dt', {}, 'Tarkov'), h('dd', {}, v.tarkov || '未知'),
         h('dt', {}, '运行方式'), h('dd', {}, bundled.embedded ? '单文件 exe（内置资源）' : '源码（node server.js）'),
@@ -3169,6 +3232,9 @@ async function renderClient() {
   if (!state.app || !state.app.autoRoot) return frag(pageHead('游戏客户端'), noRootCard());
   const l = await GET('/api/launch');
   const hl = await GET('/api/fika/headless').catch(() => ({ installs: [] }));
+  const serversInfo = await GET('/api/servers').catch(() => ({ history: [] }));
+  const presenceInfo = await GET('/api/servers/presence').catch(() => null);
+  let serverHistory = serversInfo.history || [];
   const profilesList = l.list || [];
   const tgt = l.target || { url: '', name: '', autoLogin: true, isLocal: true };
 
@@ -3189,14 +3255,20 @@ async function renderClient() {
       h('div', { class: 'label' }, '本地服务端'),
       h('div', { class: 'value', style: 'font-size:20px' }, l.serverRunning ? '运行中' : '未启动'),
       h('div', { class: 'foot' }, '独立开关在「服务器」页')),
+    h('div', { class: 'stat' },
+      h('div', { class: 'label' }, '在线玩家'),
+      h('div', { class: 'value', id: 'stat-players', style: 'font-size:20px' },
+        presenceInfo && presenceInfo.ok ? `${presenceInfo.count || 0} 人` : '—'),
+      h('div', { class: 'foot', id: 'stat-players-foot', style: 'word-break:break-all' },
+        presenceInfo && presenceInfo.ok ? (presenceInfo.isLocal ? '本机服务端' : '远程服务端') : '服务端没响应')),
   );
 
   const profSelect = h('select', { class: 'input' }, ...profilesList.map((p) =>
     h('option', { value: p.nickname, selected: p.active }, `${p.nickname}${p.level != null ? `（${p.level} 级）` : ''}`)));
-  const modeSel = h('select', { class: 'input' },
+  const modeSel = h('select', { class: 'input', id: 'server-mode' },
     h('option', { value: 'local', selected: tgt.isLocal }, '本机服务端（自己开服）'),
     h('option', { value: 'remote', selected: !tgt.isLocal }, '远程服务器（别人开的）'));
-  const urlInp = h('input', { class: 'input', value: tgt.url || 'https://127.0.0.1:6969' });
+  const urlInp = h('input', { class: 'input', id: 'server-url', value: tgt.url || 'https://127.0.0.1:6969' });
   const autoLoginCb = h('input', { type: 'checkbox', checked: tgt.autoLogin !== false });
   const autoServer = h('input', { type: 'checkbox', checked: false });
   const autoServerField = h('div', { class: 'field' }, h('label', {}, '启动前自动拉起本地服务端'),
@@ -3229,6 +3301,64 @@ async function renderClient() {
   modeSel.addEventListener('change', syncMode);
   syncMode();
   syncProf();
+
+  // ---------------------------------------------------------------- 服务端地址补全 + 地址簿
+  const normUrl = (s) => {
+    let raw = String(s == null ? '' : s).trim().replace(/^["'<\s]+|["'>\s]+$/g, '');
+    if (!raw) return { ok: false, error: '地址不能为空' };
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) raw = `https://${raw}`;
+    let u;
+    try { u = new URL(raw); } catch { return { ok: false, error: '地址不合法' }; }
+    const scheme = String(u.protocol).replace(/:$/, '').toLowerCase();
+    if (!/^https?$/.test(scheme)) return { ok: false, error: '只支持 http / https' };
+    if (!u.hostname) return { ok: false, error: '缺少主机名' };
+    const port = Number(u.port || 6969);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, error: '端口不合法' };
+    const host = u.hostname.includes(':') ? `[${u.hostname.replace(/^\[|\]$/g, '')}]` : u.hostname;
+    return { ok: true, url: `${scheme}://${host}:${port}` };
+  };
+  const normHint = h('div', { class: 'hint', style: 'margin-top:2px' }, '');
+  const syncNorm = () => {
+    if (modeSel.value === 'local') { normHint.textContent = ''; normHint.style.color = ''; return; }
+    const v = urlInp.value.trim();
+    if (!v) { normHint.textContent = '只填 IP 也行：会自动补成 https://IP:6969'; normHint.style.color = ''; return; }
+    const r = normUrl(v);
+    normHint.textContent = r.ok ? `将保存为 ${r.url}` : `⚠ ${r.error}（例如 https://1.2.3.4:6969）`;
+    normHint.style.color = r.ok ? '' : '#c0392b';
+  };
+  urlInp.addEventListener('input', syncNorm);
+  urlInp.addEventListener('blur', syncNorm);
+  modeSel.addEventListener('change', () => syncNorm());
+  if (modeSel.value === 'remote') syncNorm();
+
+  const histSel = h('select', { class: 'input', style: 'margin-top:8px' },
+    h('option', { value: '' }, serverHistory.length ? `从保存过的地址里选（${serverHistory.length} 个）` : '还没有保存过的地址'),
+    ...serverHistory.map((x) => h('option', { value: x.url },
+      `${x.name ? `${x.name} · ` : ''}${x.url}${x.lastUsedAt ? ` · ${String(x.lastUsedAt).slice(5, 16).replace('T', ' ')}` : ''}`)));
+  const histUse = h('button', { class: 'btn sm', onclick: () => {
+    const v = histSel.value;
+    if (!v) { toast('先从下拉里选一个地址', 'warn'); return; }
+    modeSel.value = 'remote';
+    syncMode();
+    urlInp.value = v;
+    syncNorm();
+    toast('已填入地址，点「保存连接设置」生效', 'ok');
+  } }, '用这个');
+  const histDel = h('button', { class: 'btn sm', onclick: async () => {
+    const v = histSel.value;
+    if (!v) { toast('先从下拉里选一个地址', 'warn'); return; }
+    try {
+      const r = await POST('/api/servers/forget', { url: v });
+      serverHistory = r.history || [];
+      toast('已从地址簿删除', 'ok');
+      await render();
+    } catch (err) { toast(String(err.message || err), 'err'); }
+  } }, '删除');
+  const historyField = h('div', { class: 'field', style: 'grid-column:1/-1' },
+    h('label', {}, '保存过的服务端地址'),
+    histSel,
+    h('div', { class: 'row', style: 'margin-top:8px;gap:8px;flex-wrap:wrap' }, histUse, histDel),
+    h('div', { class: 'hint' }, '每次保存连接设置都会记进地址簿，之后一键切换（最多保留 15 条）'));
 
   // ---------------------------------------------------------------- 启动方式：客户端 / 无头主机
   const headlessList = hl.installs || [];
@@ -3296,8 +3426,9 @@ async function renderClient() {
     h('div', { class: 'grid c2' },
       h('div', { class: 'field' }, h('label', {}, '连接哪个服务端'), modeSel,
         h('div', { class: 'hint' }, '连别人的服务器就选远程，地址填对方给的 https://IP:6969')),
-      h('div', { class: 'field' }, h('label', {}, '服务端地址 Server.Url'), urlInp,
-        h('div', { class: 'hint' }, '本机模式自动用 127.0.0.1；远程模式手填对方地址（要带端口）'))),
+      h('div', { class: 'field' }, h('label', {}, '服务端地址 Server.Url'), urlInp, normHint,
+        h('div', { class: 'hint' }, '本机模式自动用 127.0.0.1；远程模式填对方 IP 即可，保存时会补成 https://IP:6969'))),
+    h('div', { style: 'margin-top:12px' }, historyField),
     h('div', { class: 'grid c2', style: 'margin-top:12px' },
       h('div', { class: 'field' }, h('label', {}, '要载入的存档'),
         profSelect,
@@ -3349,6 +3480,64 @@ async function renderClient() {
         try { await POST('/api/launch/open', { kind: 'root' }); } catch (err) { toast(String(err.message || err), 'err'); }
       } }, '打开游戏目录')));
 
+  // ---------------------------------------------------------------- 在线玩家（Fika presence）
+  const ACTIVITY_CN = (a) => {
+    const s = String(a || '').toLowerCase();
+    if (!s) return '';
+    if (s.includes('raid')) return '对局中';
+    if (s.includes('menu') || s.includes('hub')) return '大厅';
+    if (s.includes('match')) return '匹配中';
+    if (s.includes('hideout')) return '藏身处';
+    return a;
+  };
+  const paintPlayers = (r) => {
+    // 用 id 取节点：页面重渲染后定时器仍能画到「当前」那张卡上
+    const sub = document.getElementById('players-sub');
+    const empty = document.getElementById('players-empty');
+    const listBox = document.getElementById('players-list');
+    if (!sub || !empty || !listBox) return;
+    const list = (r && r.players) || [];
+    const ok = !!(r && r.ok);
+    sub.textContent = ok
+      ? `${list.length} 人在线 · ${r.url}${r.isLocal ? '（本机）' : ''}`
+      : (r && r.error ? `查询失败：${r.error}` : '还没有查询');
+    // 顶部统计卡也要跟着刷新
+    const stat = document.getElementById('stat-players');
+    const statFoot = document.getElementById('stat-players-foot');
+    if (stat) stat.textContent = ok ? `${list.length} 人` : '—';
+    if (statFoot) statFoot.textContent = ok ? (r.isLocal ? '本机服务端' : '远程服务端') : (r && r.error ? '服务端没响应' : '还没查询');
+    empty.textContent = ok && !list.length
+      ? '当前没有玩家在线。这个数字来自 Fika 的 /fika/presence/get：只统计连上这台服务端、并且装了 Fika 的玩家。'
+      : (r && r.hint ? r.hint : '');
+    listBox.replaceChildren(...(list.length ? list.map((p) => {
+      const bits = [ACTIVITY_CN(p.activity), p.raidCode ? `对局 ${p.raidCode}` : ''].filter(Boolean).join(' · ');
+      return h('div', { class: 'list-row' },
+        h('div', { style: 'min-width:0' },
+          h('div', { style: 'font-weight:550' }, `${p.nickname}${p.level != null ? `（${p.level} 级）` : ''}${p.headless ? ' · 无头主机' : ''}`),
+          h('div', { class: 'hint', style: 'word-break:break-all' }, bits || '在线')),
+        h('div', { class: 'actions' }, h('span', { class: 'tag' }, '在线')));
+    }) : []));
+  };
+  const refreshPlayers = async () => {
+    try {
+      const modeEl = document.getElementById('server-mode');
+      const urlEl = document.getElementById('server-url');
+      const mode = modeEl ? modeEl.value : modeSel.value;
+      const raw = urlEl ? urlEl.value.trim() : urlInp.value.trim();
+      const q = mode === 'remote' && raw ? `?url=${encodeURIComponent(raw)}` : '';
+      paintPlayers(await GET(`/api/servers/presence${q}`));
+    } catch { /* 查询失败保持上一次结果 */ }
+  };
+
+  const playersCard = h('div', { class: 'card', id: 'players-card', style: 'margin-top:16px' },
+    h('div', { class: 'card-head' }, h('h2', {}, '在线玩家'), h('span', { class: 'sub', id: 'players-sub' }, ''),
+      h('button', { class: 'btn sm', onclick: async () => { await refreshPlayers(); toast('已刷新在线玩家', 'ok'); } }, '刷新')),
+    h('div', { class: 'hint', id: 'players-empty', style: 'margin-top:0' }, ''),
+    h('div', { class: 'list', id: 'players-list' }));
+  paintPlayers(presenceInfo);
+  if (state.clientTimer) clearInterval(state.clientTimer);
+  state.clientTimer = setInterval(() => { if (state.page === 'client') refreshPlayers(); }, 5000);
+
   const linkRow = (title, sub, btnLabel, onClick) => h('div', { class: 'list-row' },
     h('div', { style: 'min-width:0' },
       h('div', { style: 'font-weight:550' }, title),
@@ -3399,6 +3588,7 @@ async function renderClient() {
     stats,
     gamePathWarn,
     h('div', { style: 'height:16px' }),
+    playersCard,
     modeCard,
     mainCard,
     sideCard,

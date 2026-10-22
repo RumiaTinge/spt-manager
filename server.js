@@ -29,6 +29,7 @@ import * as live from './lib/live.js';
 import * as raidProbe from './lib/raidprobe.js';
 import * as items from './lib/items.js';
 import { EMBEDDED, readEmbedded, readDisk } from './lib/assets.js';
+import * as serverlink from './lib/serverlink.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, 'public');
@@ -540,7 +541,8 @@ route('POST', /^\/api\/ai\/boss$/, async (ctx) => {
 // ---- AI 规则（NoAIBots 服务器 mod）
 route('GET', /^\/api\/ai\/rules$/, async () => {
   const root = requireRoot();
-  return { ok: true, ...aiRules.readRules(root), defaults: aiRules.defaultConfig(), catalog: aiRules.RULE_CATALOG, actionDefs: aiRules.ACTION_DEFS, actionGroups: aiRules.ACTION_GROUPS, amountLabels: aiRules.BOT_AMOUNT_LABEL, mapDefaults: aiRules.mapDefaults(root), spawn: aiRules.spawnData(root), pmcInfo: aiRules.pmcInfo(root), commonSkills: aiRules.COMMON_SKILLS };
+  const bundle = bundled.bundleStatus(root).find((x) => x.id === 'noaibots') || null;
+  return { ok: true, bundle, ...aiRules.readRules(root), defaults: aiRules.defaultConfig(), catalog: aiRules.RULE_CATALOG, actionDefs: aiRules.ACTION_DEFS, actionGroups: aiRules.ACTION_GROUPS, amountLabels: aiRules.BOT_AMOUNT_LABEL, mapDefaults: aiRules.mapDefaults(root), spawn: aiRules.spawnData(root), pmcInfo: aiRules.pmcInfo(root), commonSkills: aiRules.COMMON_SKILLS };
 });
 
 route('POST', /^\/api\/ai\/rules$/, async (ctx) => {
@@ -553,8 +555,8 @@ route('POST', /^\/api\/ai\/rules$/, async (ctx) => {
 // 只保存一条规则：不会把其他卡片里未保存的编辑一起写进去
 route('POST', /^\/api\/ai\/rules\/rule$/, async (ctx) => {
   const root = requireRoot();
-  const { index, rule } = await readJsonBody(ctx.req);
-  const r = aiRules.writeRule(root, index, rule);
+  const { index, rule, total } = await readJsonBody(ctx.req);
+  const r = aiRules.writeRule(root, index, rule, total);
   return { ok: true, ...r };
 });
 
@@ -964,6 +966,37 @@ route('POST', /^\/api\/launch\/target$/, async (ctx) => {
   const body = await readJsonBody(ctx.req);
   const r = launch.setServerTarget(root, { url: body.url, name: body.name, autoLogin: body.autoLogin });
   return { ok: true, ...r };
+});
+
+// ---- 服务端地址簿 + 在线玩家（Fika presence）
+route('GET', /^\/api\/servers$/, async () => {
+  const root = getSptRoot();
+  const port = root ? Number(readJson(path.join(root, 'SPT', 'SPT_Data', 'configs', 'http.json'), {}).port || 6969) || 6969 : 6969;
+  const target = root ? launch.serverTarget(root) : null;
+  return {
+    ok: true,
+    localDefault: `https://127.0.0.1:${port}`,
+    target: target && target.ok ? target : null,
+    history: serverlink.historyList(),
+  };
+});
+
+route('POST', /^\/api\/servers\/forget$/, async (ctx) => {
+  const body = await readJsonBody(ctx.req);
+  return { ok: true, history: serverlink.forgetServer(body.url) };
+});
+
+// 在线玩家：默认查当前连接目标（本机/远程），也可以 ?url= 指定别的服务端
+route('GET', /^\/api\/servers\/presence$/, async (ctx) => {
+  const root = getSptRoot();
+  const port = root ? Number(readJson(path.join(root, 'SPT', 'SPT_Data', 'configs', 'http.json'), {}).port || 6969) || 6969 : 6969;
+  let url = ctx.url.searchParams.get('url') || '';
+  if (!url) {
+    const t = root ? launch.serverTarget(root) : null;
+    url = t && t.ok && t.url ? t.url : `https://127.0.0.1:${port}`;
+  }
+  const r = await serverlink.fetchPresence(url);
+  return { ok: r.ok, ...r };
 });
 
 route('POST', /^\/api\/launch\/profile$/, async (ctx) => {
