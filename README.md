@@ -82,6 +82,17 @@ SPT 启动器的 `config.json` 里 `GamePath` 必须是游戏根目录（`Escape
 
 输入框下面会实时显示「将保存为 …」。每次保存都会把地址记进**地址簿**（`data\settings.json → serverHistory`，最多 15 条），下拉选一条就能「用这个」直接填回或「删除」，方便在本机 / 远程 / 多个朋友服务器之间切换。对应接口：`GET /api/servers`、`POST /api/servers/forget`。
 
+### 读取服务端存档（同步账号列表）
+
+「要载入的存档」默认列本机 `SPT\user\profiles\*.json`。连**别人的服务端**时，本机那份列表可能根本没有对方的账号，所以加了个「读取服务端存档」：
+
+- 直接问对方服务端的 `GET /launcher/profiles`（老版本没这个路由就退 `/launcher/v2/profiles`），拿到 `username / nickname / side / currlvl / edition`；
+- 拉回来之后下拉框换成对方服上的账号（例如 `Rumia · 16 级 · USEC`），选一个再点「应用存档」，写进启动器 `SPT\user\launcher\config.json → Server.AutoLoginCreds.Username`；
+- 切到「远程服务器」模式时会自动拉一次（失败只在提示行里说，不弹窗）；提示行会写清「账号：X · 密码留空（SPT 只认用户名） · 来自服务端 https://…（N 个）」；
+- 对方服务端没开 / 地址不通时会在 4 秒内报「连接超时」，不会把整页卡住。对应接口：`GET /api/servers/profiles[?url=https://ip:6969]`。
+
+顺带把两处卡顿修了：`GET /api/profiles` 不再等远程服务端的在线信息（原来连不通要等 20 秒，现在只在本机目标时补、最多 2.5 秒）；「在线玩家」改成页面渲染完再异步拉（不阻塞首屏）。
+
 ## 内置基础模组（关于页）
 
 exe 里已经带了四样东西，换电脑、重装、带朋友入门都不用再去找压缩包：

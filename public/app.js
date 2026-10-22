@@ -3233,7 +3233,8 @@ async function renderClient() {
   const l = await GET('/api/launch');
   const hl = await GET('/api/fika/headless').catch(() => ({ installs: [] }));
   const serversInfo = await GET('/api/servers').catch(() => ({ history: [] }));
-  const presenceInfo = await GET('/api/servers/presence').catch(() => null);
+  // 在线玩家不阻塞页面：先按「还没查询」渲染，卡片挂上去之后再异步拉
+  const presenceInfo = null;
   let serverHistory = serversInfo.history || [];
   const profilesList = l.list || [];
   const tgt = l.target || { url: '', name: '', autoLogin: true, isLocal: true };
@@ -3250,7 +3251,7 @@ async function renderClient() {
     h('div', { class: 'stat' },
       h('div', { class: 'label' }, '要载入的存档'),
       h('div', { class: 'value', style: 'font-size:20px' }, l.active || '未设置'),
-      h('div', { class: 'foot' }, `${profilesList.length} 个本地存档 · ${tgt.autoLogin === false ? '启动器手填账号' : '自动登录'}`)),
+      h('div', { class: 'foot', id: 'stat-profile-foot' }, `${profilesList.length} 个本地存档 · ${tgt.autoLogin === false ? '启动器手填账号' : '自动登录'}`)),
     h('div', { class: 'stat' },
       h('div', { class: 'label' }, '本地服务端'),
       h('div', { class: 'value', style: 'font-size:20px' }, l.serverRunning ? '运行中' : '未启动'),
@@ -3263,8 +3264,29 @@ async function renderClient() {
         presenceInfo && presenceInfo.ok ? (presenceInfo.isLocal ? '本机服务端' : '远程服务端') : '服务端没响应')),
   );
 
-  const profSelect = h('select', { class: 'input' }, ...profilesList.map((p) =>
+  const SIDE_CN = { Usec: 'USEC', Bear: 'BEAR', Savage: 'SCAV', Pmc: 'PMC' };
+  // 存档列表：默认本地 SPT/user/profiles；连远程服时可以「读取服务端存档」再选
+  const profSource = { url: '', count: 0, at: null };
+  const profLabel = (p) => {
+    const nick = p.nickname && p.nickname !== p.username ? `（${p.nickname}）` : '';
+    return `${p.username}${nick}${p.level != null ? ` · ${p.level} 级` : ''}${p.side ? ` · ${SIDE_CN[p.side] || p.side}` : ''}`;
+  };
+  const profSelect = h('select', { class: 'input', id: 'profile-select' }, ...profilesList.map((p) =>
     h('option', { value: p.nickname, selected: p.active }, `${p.nickname}${p.level != null ? `（${p.level} 级）` : ''}`)));
+  const rebuildProfOptions = (list, { activeName, fromServer } = {}) => {
+    const cur = String(activeName || profSelect.value || '').trim();
+    const opts = list.map((p) => h('option', { value: p.username, selected: p.username === cur }, profLabel(p)));
+    profSelect.replaceChildren(...(opts.length ? opts : [h('option', { value: '' }, '（没有存档）')]));
+    if (cur && !list.some((p) => p.username === cur)) {
+      profSelect.appendChild(h('option', { value: cur, selected: true }, `${cur}（服务端没有这个账号）`));
+    }
+    if (cur) profSelect.value = cur;
+    if (fromServer) {
+      profSource.url = fromServer.url || '';
+      profSource.count = list.length;
+      profSource.at = fromServer.at || null;
+    }
+  };
   const modeSel = h('select', { class: 'input', id: 'server-mode' },
     h('option', { value: 'local', selected: tgt.isLocal }, '本机服务端（自己开服）'),
     h('option', { value: 'remote', selected: !tgt.isLocal }, '远程服务器（别人开的）'));
@@ -3278,9 +3300,42 @@ async function renderClient() {
   const profHint = h('div', { class: 'hint', style: 'margin-top:4px' }, '');
   const syncProf = () => {
     const name = profSelect.value;
-    profHint.textContent = name ? `账号：${name} · 密码留空（SPT 只认用户名，不校验密码）` : '还没有本地存档';
+    const src = profSource.url
+      ? ` · 来自服务端 ${profSource.url}（${profSource.count} 个）`
+      : ` · 本地 ${profilesList.length} 个存档`;
+    profHint.textContent = name ? `账号：${name} · 密码留空（SPT 只认用户名，不校验密码）${src}` : '还没有存档';
   };
   profSelect.addEventListener('change', syncProf);
+
+  // 读取「对方服务端」的存档列表（GET /launcher/profiles），同步到下面这个下拉框
+  let profSeq = 0;
+  const loadServerProfiles = async ({ quiet } = {}) => {
+    const seq = ++profSeq;
+    const modeEl = document.getElementById('server-mode');
+    const urlEl = document.getElementById('server-url');
+    const mode = modeEl ? modeEl.value : modeSel.value;
+    const raw = urlEl ? urlEl.value.trim() : urlInp.value.trim();
+    const q = mode === 'remote' && raw ? `?url=${encodeURIComponent(raw)}` : '';
+    try {
+      const r = await GET(`/api/servers/profiles${q}`);
+      if (seq !== profSeq) return r; // 已经有更新的一次请求，丢掉这次的结果
+      if (!r.ok) {
+        profHint.textContent = `读取服务端存档失败：${r.error || '未知错误'}${r.hint ? `（${r.hint}）` : ''}`;
+        if (!quiet) toast(`读取服务端存档失败：${r.error || '未知错误'}`, 'err');
+        return r;
+      }
+      rebuildProfOptions(r.profiles, { activeName: l.active, fromServer: r });
+      syncProf();
+      const foot = document.getElementById('stat-profile-foot');
+      if (foot) foot.textContent = `${r.count} 个服务端存档 · ${r.isLocal ? '本机服务端' : '远程服务端'}`;
+      if (!quiet) toast(`已同步服务端存档 ${r.count} 个（${r.url}）`, 'ok');
+      return r;
+    } catch (err) {
+      if (seq === profSeq) profHint.textContent = `读取服务端存档失败：${String(err.message || err)}`;
+      if (!quiet && seq === profSeq) toast(String(err.message || err), 'err');
+      return { ok: false, error: String(err.message || err) };
+    }
+  };
 
   function syncMode() {
     const local = modeSel.value === 'local';
@@ -3297,6 +3352,7 @@ async function renderClient() {
     modeHint.textContent = local
       ? '本机模式：服务端和客户端都在本机，直接用本地存档即可。'
       : '远程模式：要用对方服务器上的账号，本地存档不会出现在对方服里；建议关掉「启动器自动登录」手动输密码。';
+    if (!local) setTimeout(() => { if (document.getElementById('server-mode')) loadServerProfiles({ quiet: true }); }, 300);
   }
   modeSel.addEventListener('change', syncMode);
   syncMode();
@@ -3432,6 +3488,9 @@ async function renderClient() {
     h('div', { class: 'grid c2', style: 'margin-top:12px' },
       h('div', { class: 'field' }, h('label', {}, '要载入的存档'),
         profSelect,
+        h('div', { class: 'row', style: 'margin-top:6px;flex-wrap:wrap;gap:8px' },
+          h('button', { class: 'btn sm', onclick: async (e) => { e.target.disabled = true; try { await loadServerProfiles(); } finally { e.target.disabled = false; } } }, '读取服务端存档'),
+          h('span', { class: 'hint', style: 'margin-top:0' }, '连远程服时先把对方服上的存档读过来再选')),
         profHint,
         h('div', { class: 'hint' }, '写入 SPT/user/launcher/config.json 的 AutoLoginCreds；远程服务器要用对方服上的账号')),
       h('div', { class: 'field' }, h('label', {}, '启动器自动登录'),
@@ -3479,6 +3538,9 @@ async function renderClient() {
       h('button', { class: 'btn', onclick: async () => {
         try { await POST('/api/launch/open', { kind: 'root' }); } catch (err) { toast(String(err.message || err), 'err'); }
       } }, '打开游戏目录')));
+
+  // 进页面时如果当前目标是远程服，就把对方服的存档列表拉过来（失败只写提示，不弹窗）
+  if (!tgt.isLocal) setTimeout(() => { if (document.getElementById('server-mode')) loadServerProfiles({ quiet: true }); }, 600);
 
   // ---------------------------------------------------------------- 在线玩家（Fika presence）
   const ACTIVITY_CN = (a) => {
@@ -3535,6 +3597,7 @@ async function renderClient() {
     h('div', { class: 'hint', id: 'players-empty', style: 'margin-top:0' }, ''),
     h('div', { class: 'list', id: 'players-list' }));
   paintPlayers(presenceInfo);
+  setTimeout(() => { if (document.getElementById('players-card')) refreshPlayers(); }, 80);
   if (state.clientTimer) clearInterval(state.clientTimer);
   state.clientTimer = setInterval(() => { if (state.page === 'client') refreshPlayers(); }, 5000);
 

@@ -1,6 +1,6 @@
 // serverlink-test.js — 服务端地址补全 / 地址簿 / Fika 在线玩家解析
 import assert from 'node:assert/strict';
-import { normalizeServerUrl, parsePresence, activityCn } from '../lib/serverlink.js';
+import { normalizeServerUrl, parsePresence, parseProfiles, activityCn } from '../lib/serverlink.js';
 
 let pass = 0;
 function ok(name, fn) {
@@ -56,5 +56,21 @@ ok('Menu → 大厅', () => assert.equal(activityCn('Menu'), '大厅'));
 ok('Matching → 匹配中', () => assert.equal(activityCn('Matching'), '匹配中'));
 ok('空串保持空', () => assert.equal(activityCn(''), ''));
 ok('未知值原样', () => assert.equal(activityCn('Whatever'), 'Whatever'));
+
+console.log('parseProfiles');
+ok('服务端数组：用户名/昵称/等级/阵营/版本', () => {
+  const p = parseProfiles([{ username: 'Rumia', nickname: 'Rumia', side: 'Usec', currlvl: 16, edition: 'SPT Easy start', profileId: 'abc', sptData: { version: '4.0.13 (40087)' } }]);
+  assert.equal(p.length, 1);
+  assert.equal(p[0].username, 'Rumia');
+  assert.equal(p[0].level, 16);
+  assert.equal(p[0].side, 'Usec');
+  assert.equal(p[0].sptVersion, '4.0.13 (40087)');
+});
+ok('v2 的 {Response:[...]} 包裹也能解析', () => assert.equal(parseProfiles({ Response: [{ username: 'A' }] })[0].username, 'A'));
+ok('{profiles:[...]} 也能解析', () => assert.equal(parseProfiles({ profiles: [{ username: 'B' }] })[0].username, 'B'));
+ok('没有用户名的条目跳过', () => assert.equal(parseProfiles([null, {}, { nickname: 'X' }]).length, 0));
+ok('同账号去重', () => assert.equal(parseProfiles([{ username: 'A' }, { username: 'A' }]).length, 1));
+ok('按用户名排序', () => assert.deepEqual(parseProfiles([{ username: 'b' }, { username: 'a' }]).map((x) => x.username), ['a', 'b']));
+ok('没有昵称时用用户名', () => assert.equal(parseProfiles([{ username: 'C' }])[0].nickname, 'C'));
 
 console.log(`\n${pass} passed`);

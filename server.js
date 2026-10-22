@@ -661,18 +661,25 @@ route('POST', /^\/api\/loot\/restore$/, async (ctx) => {
 route('GET', /^\/api\/profiles$/, async () => {
   const root = requireRoot();
   const list = game.listProfiles(root);
-  // 服务端在跑就顺带补上在线信息（等级、版本），读不到不算错
+  // 服务端在跑就顺带补上在线信息（等级、版本），读不到不算错。
+  // 注意：连远程目标时不要等（对方不可达会拖住整个页面），本地才补。
   try {
-    const online = await launch.serverProfiles(root);
-    const byName = new Map(online.map((p) => [String(p.username || '').toLowerCase(), p]));
-    for (const p of list) {
-      const o = byName.get(String(p.nickname || '').toLowerCase());
-      if (!o) continue;
-      p.edition = p.edition || o.edition;
-      p.level = o.currlvl ?? p.level;
-      p.experience = o.currexp ?? p.experience;
-      p.side = o.side || p.side;
-      p.online = true;
+    const target = launch.serverTarget(root);
+    if (target && target.ok && target.isLocal) {
+      const online = await Promise.race([
+        launch.serverProfiles(root),
+        new Promise((resolve) => setTimeout(() => resolve([]), 2500)),
+      ]);
+      const byName = new Map(online.map((p) => [String(p.username || '').toLowerCase(), p]));
+      for (const p of list) {
+        const o = byName.get(String(p.nickname || '').toLowerCase());
+        if (!o) continue;
+        p.edition = p.edition || o.edition;
+        p.level = o.currlvl ?? p.level;
+        p.experience = o.currexp ?? p.experience;
+        p.side = o.side || p.side;
+        p.online = true;
+      }
     }
   } catch { /* 服务端没开就只显示文件信息 */ }
   return { ok: true, list, backups: game.listProfileBackups(root) };
@@ -996,6 +1003,19 @@ route('GET', /^\/api\/servers\/presence$/, async (ctx) => {
     url = t && t.ok && t.url ? t.url : `https://127.0.0.1:${port}`;
   }
   const r = await serverlink.fetchPresence(url);
+  return { ok: r.ok, ...r };
+});
+
+// 服务端存档列表：默认查当前连接目标，也可以 ?url= 指定别的服务端
+route('GET', /^\/api\/servers\/profiles$/, async (ctx) => {
+  const root = getSptRoot();
+  const port = root ? Number(readJson(path.join(root, 'SPT', 'SPT_Data', 'configs', 'http.json'), {}).port || 6969) || 6969 : 6969;
+  let url = ctx.url.searchParams.get('url') || '';
+  if (!url) {
+    const t = root ? launch.serverTarget(root) : null;
+    url = t && t.ok && t.url ? t.url : `https://127.0.0.1:${port}`;
+  }
+  const r = await serverlink.fetchProfiles(url);
   return { ok: r.ok, ...r };
 });
 
