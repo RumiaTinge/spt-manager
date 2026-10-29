@@ -809,6 +809,35 @@ const SEASONAL_MAP_CN = {
 };
 const SEASON_CN = { 0: '夏天', 1: '秋天', 2: '冬天', 3: '春天', 4: '深秋', 5: '早春' };
 
+// 节日活动类型 → 中文
+const SEASONAL_TYPE_CN = {
+  HALLOWEEN: '万圣节',
+  CHRISTMAS: '圣诞',
+  NEWYEARS: '新年',
+  NEW_YEARS: '新年',
+  APRILFOOLS: '愚人节',
+  APRIL_FOOLS: '愚人节',
+};
+
+// 节日活动 settings 的字段 → 中文名 + 说明
+const SEASONAL_SETTING_CN = {
+  enableSummoning: ['启用召唤', '万圣节祭坛召唤事件'],
+  removeEntryRequirement: ['取消进入条件', '这些地图进入不再需要钥匙 / 任务（实验室）'],
+  replaceBotHostility: ['替换 Bot 敌对关系', '活动期间使用 hostilitySettingsForEvent 里的敌对表'],
+  zombieSettings: ['僵尸 / 感染', '活动期间把部分地图变成僵尸感染区'],
+  disableBosses: ['禁用首领的地图', '这些地图活动期间不刷首领'],
+  disableWaves: ['禁用波次的地图', '这些地图活动期间不刷波次 AI'],
+  enabled: ['启用僵尸感染', '关掉后本活动的僵尸设置不生效'],
+  mapInfectionAmount: ['感染度按地图', '每张图的感染比例（%）'],
+  adjustBotAppearances: ['调整 Bot 外观', '按 botAppearanceChanges 换节日外观'],
+  enableChristmasHideout: ['圣诞藏身处装饰', '藏身处换成圣诞装饰'],
+  enableSanta: ['启用圣诞老人', '刷圣诞老人（送礼物）'],
+  enableRundansEvent: ['启用 Rundans 活动', '圣诞期间的 Rundans 事件'],
+  enableKhorvodEvent: ['启用 Khorovod 活动', '圣诞期间的 Khorovod 事件'],
+  christmasLootBoostAmount: ['圣诞物资加成', '战局物资生成倍率加成（0.03 = +3%）'],
+  forceSeason: ['强制季节', '活动期间强制切换到的季节'],
+};
+
 /** 节日 / 季节性活动卡片（seasonalevents.json） */
 function seasonalCard(s) {
   const bit = (label, get, set) => {
@@ -871,8 +900,9 @@ function seasonalCard(s) {
   };
 
   const eventBoxes = s.events.map((ev) => {
+    const typeCn = SEASONAL_TYPE_CN[String(ev.type || '').toUpperCase()];
     const top = h('div', { class: 'row', style: 'gap:10px;align-items:center;flex-wrap:wrap' },
-      h('span', { class: 'tag' }, ev.type || '活动'),
+      h('span', { class: 'tag', title: ev.type || '' }, typeCn || ev.type || '活动'),
       textInp(ev.name, (v) => { ev.name = v; }, { style: 'width:200px' }),
       bit('启用', () => ev.enabled, (v) => { ev.enabled = v; }),
       stateTag(ev));
@@ -893,7 +923,9 @@ function seasonalCard(s) {
               numInp(mv, 0, 100, (n) => { v2[mk] = n; }, '90px')));
             return h('div', { style: 'grid-column:1/-1' }, h('div', { class: 'hint' }, '感染度按地图（%）'), h('div', { class: 'grid c4' }, ...maps));
           }
-          return h('div', { class: 'field' }, h('label', {}, k2), renderSetting(k2, v2, v, k2));
+          const cn2 = SEASONAL_SETTING_CN[k2];
+          const label2 = cn2 ? cn2[0] : k2;
+          return h('div', { class: 'field' }, h('label', { title: cn2 ? `${k2}：${cn2[1]}` : k2 }, label2), renderSetting(k2, v2, v, label2));
         });
         return h('div', { style: 'grid-column:1/-1;border-top:1px dashed var(--line);padding-top:10px' },
           h('div', { class: 'hint', style: 'margin-bottom:8px' }, '僵尸 / 感染'),
@@ -905,7 +937,9 @@ function seasonalCard(s) {
         sel.addEventListener('change', () => { ev.settings[k] = Number(sel.value); });
         return h('div', { class: 'field' }, h('label', {}, '强制季节'), sel);
       }
-      return h('div', { class: 'field' }, h('label', {}, k), renderSetting(k, v, ev.settings, k));
+      const cn = SEASONAL_SETTING_CN[k];
+      const label2 = cn ? cn[0] : k;
+      return h('div', { class: 'field' }, h('label', { title: cn ? `${k}：${cn[1]}` : k }, label2), renderSetting(k, v, ev.settings, label2));
     });
 
     return h('div', { class: 'seasonal-ev' },
@@ -929,8 +963,12 @@ function seasonalCard(s) {
     h('h2', {}, '节日 / 季节性活动'),
     h('span', { class: 'sub' }, s.path || 'SPT_Data\\configs\\seasonalevents.json'));
 
+  const activeCn = (s.active || []).map((a) => {
+    const ev = (s.events || []).find((e) => String(e.type || '').toUpperCase() === String(a).toUpperCase() || e.name === a);
+    return (ev && SEASONAL_TYPE_CN[String(ev.type || '').toUpperCase()]) || a;
+  }).join('、');
   const intro = h('div', { class: 'hint', style: 'margin-bottom:10px' },
-    `服务端按「今天的月/日」判断哪个活动生效。今天 ${s.today.month} 月 ${s.today.day} 日，生效中：${s.active.length ? s.active.join('、') : '无'}。`
+    `服务端按「今天的月/日」判断哪个活动生效。今天 ${s.today.month} 月 ${s.today.day} 日，生效中：${activeCn || '无'}。`
     + '改完需要重启服务端；只有开着的活动才会套用下面这些开关。');
 
   const globalRow = h('div', { class: 'row', style: 'gap:14px;align-items:center;flex-wrap:wrap' },
@@ -1444,7 +1482,7 @@ async function renderAi() {
   const caps = bot.maxBotCap || {};
 
   const capInputs = Object.entries(caps).map(([k, v]) => h('div', { class: 'field' },
-    h('label', {}, mapName(k)),
+    h('label', { title: k }, k === 'default' ? '兜底（default）' : mapName(k)),
     h('input', { class: 'input', type: 'number', min: '0', max: '80', value: String(v), dataset: { cap: k } })));
 
   const goonChance = bot.goonSpawnSystem && bot.goonSpawnSystem.spawnChance;
@@ -1667,7 +1705,7 @@ function renderAiRulesSection(aiData, rulesData) {
 
   const skillGrid = h('div', { class: 'grid c4' },
     ...((rulesData && rulesData.commonSkills) || []).map((name) => h('div', { class: 'field' },
-      h('label', {}, name),
+      h('label', { title: name }, SKILL_CN[name] || name),
       h('input', {
         class: 'input', type: 'number', min: '0', max: '50', step: '1', placeholder: '原版',
         value: pmc.skills[name] === undefined ? '' : String(pmc.skills[name]),
@@ -1766,10 +1804,10 @@ function renderAiRulesSection(aiData, rulesData) {
         h('div', {},
           h('div', { class: 'hint', style: 'font-weight:600' }, '装备出现概率（pmcUSEC）'),
           h('div', { class: 'row wrap', style: 'gap:6px;margin-top:6px' },
-            ...equip.map(([k, v]) => h('span', { class: 'tag' }, `${k} ${v}%`))),
+            ...equip.map(([k, v]) => h('span', { class: 'tag', title: k }, `${EQUIP_SLOT_CN[k] || k} ${v}%`))),
           h('div', { class: 'hint', style: 'font-weight:600;margin-top:12px' }, '生成物品类别（generation.items）'),
           h('div', { class: 'row wrap', style: 'gap:6px;margin-top:6px' },
-            ...(info.types?.pmcUSEC?.generation || []).map((k) => h('span', { class: 'tag' }, k))),
+            ...(info.types?.pmcUSEC?.generation || []).map((k) => h('span', { class: 'tag', title: k }, ITEM_CATEGORY_CN[k] || k))),
           h('div', { class: 'hint', style: 'font-weight:600;margin-top:12px' }, 'normal 难度参数组（项数）'),
           h('div', { class: 'hint' }, normalDiff.join(' · ') || '—'),
           h('div', { class: 'hint', style: 'font-weight:600;margin-top:12px' }, '敌对关系'),
@@ -2571,6 +2609,24 @@ const MAP_CN = {
 };
 const mapName = (id) => MAP_CN[id] || id;
 
+// 技能 / 装备位 / 生成类别 的中文名（AI 页原版数据参考、PMC 技能格用）
+const SKILL_CN = {
+  Endurance: '耐力', Strength: '力量', Vitality: '生命', Health: '健康', StressResistance: '抗压',
+  Metabolism: '代谢', Immunity: '免疫', Perception: '感知', Intellect: '智力', Attention: '专注',
+  Charisma: '魅力', Memory: '记忆', MagDrills: '弹匣操作', Assault: '突击步枪', AimMaster: '瞄准',
+  RecoilControl: '后坐控制', CovertMovement: '潜行', FirstAid: '急救',
+};
+const EQUIP_SLOT_CN = {
+  Headwear: '头盔', Earpiece: '耳机', FaceCover: '面罩', ArmorVest: '护甲', Eyewear: '眼镜',
+  TacticalVest: '战术背心', Backpack: '背包', FirstPrimaryWeapon: '主武器', Holster: '手枪',
+  Pockets: '口袋', SecuredContainer: '安全箱',
+};
+const ITEM_CATEGORY_CN = {
+  specialItems: '特殊物品', healing: '医疗', drugs: '药物', stims: '兴奋剂', food: '食物',
+  drink: '饮料', currency: '货币', backpackLoot: '背包战利品', pocketLoot: '口袋战利品',
+  vestLoot: '背心战利品', magazines: '弹匣', grenades: '手榴弹',
+};
+
 // ---------------------------------------------------------------- 物资
 // ---------------------------------------------------------------- AI 参数说明
 async function renderAiParams() {
@@ -3037,7 +3093,7 @@ async function renderAbout() {
     h('div', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, '版本信息')),
       h('dl', { class: 'kv' },
-        h('dt', {}, '管理器'), h('dd', {}, '1.0.4'),
+        h('dt', {}, '管理器'), h('dd', {}, '1.0.5'),
         h('dt', {}, 'SPT'), h('dd', {}, v.spt || '未知'),
         h('dt', {}, 'Tarkov'), h('dd', {}, v.tarkov || '未知'),
         h('dt', {}, '运行方式'), h('dd', {}, bundled.embedded ? '单文件 exe（内置资源）' : '源码（node server.js）'),
@@ -3110,6 +3166,149 @@ const FIKA_SERVER_DESC = {
 };
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+// fika.jsonc 的分组名 → 中文
+const FIKA_GROUP_CN = {
+  client: '客户端玩法',
+  server: '服务端',
+  mods: '模组白名单',
+  SPT: 'SPT 对接',
+  http: 'HTTP 监听',
+  webhook: 'Discord 通知',
+  natPunchServer: 'NAT 打洞',
+  headless: '无头主机',
+  profiles: '无头存档',
+  scripts: '启动脚本',
+  background: '背景图',
+};
+
+// fika.jsonc 的字段 → 中文名（没列到的显示原始键名）
+const FIKA_SERVER_CN = {
+  'client.useBtr': '启用 BTR',
+  'client.friendlyFire': '队友伤害',
+  'client.dynamicVExfils': '动态载具撤离点',
+  'client.allowFreeCam': '存活时自由视角',
+  'client.allowSpectateFreeCam': '观战自由视角',
+  'client.blacklistedItems': '禁止寄送的物品',
+  'client.forceSaveOnDeath': '死亡强制存档',
+  'client.mods.required': '必需模组',
+  'client.mods.optional': '可选模组',
+  'client.useInertia': '惯性',
+  'client.sharedQuestProgression': '共享任务进度',
+  'client.canEditRaidSettings': '客户端可改战局设置',
+  'client.enableTransits': '地图过境',
+  'client.anyoneCanStartRaid': '任何人可开始战局',
+  'client.allowNamePlates': '玩家名牌',
+  'client.randomLabyrinthSpawns': '迷宫随机出生点',
+  'client.pmcFoundInRaid': 'PMC 装备 FiR',
+  'server.SPT.http.ip': '监听地址',
+  'server.SPT.http.port': '监听端口',
+  'server.SPT.http.backendIp': '下发地址',
+  'server.SPT.http.backendPort': '下发端口',
+  'server.SPT.disableSPTChatBots': '关闭 SPT 聊天机器人',
+  'server.webhook.enabled': 'Discord 通知',
+  'server.webhook.name': '通知名称',
+  'server.webhook.avatarUrl': '通知头像 URL',
+  'server.webhook.url': 'Webhook 地址',
+  'server.allowItemSending': '允许寄送物品',
+  'server.itemSendingStorageTime': '寄送保留天数',
+  'server.sentItemsLoseFIR': '寄送失去 FiR',
+  'server.launcherListAllProfiles': '启动器列出全部存档',
+  'server.sessionTimeout': '会话超时（分钟）',
+  'server.showDevProfile': '显示开发者存档',
+  'server.showNonStandardProfile': '显示非标准存档',
+  'server.adminIds': '管理员存档 ID',
+  'server.apiKey': 'API 密钥',
+  'natPunchServer.enable': 'NAT 打洞',
+  'natPunchServer.port': 'NAT 打洞端口',
+  'headless.profiles.amount': '无头存档数量',
+  'headless.profiles.aliases': '无头存档别名',
+  'headless.scripts.generate': '生成启动脚本',
+  'headless.scripts.forceIp': '无头连接 URL',
+  'headless.setLevelToAverageOfLobby': '无头 Bot 等级取平均',
+  'headless.restartAfterAmountOfRaids': '多少局后重启',
+  'background.enable': '自定义背景',
+};
+
+// com.fika.core.cfg 的段名 → 中文
+const FIKA_CLIENT_SECTION_CN = {
+  Advanced: '高级',
+  Coop: '联机',
+  'Coop | Debug': '联机 · 调试',
+  'Coop | Name Plates': '联机 · 名牌',
+  'Coop | Pinging': '联机 · 标记',
+  'Coop | Quest Sharing': '联机 · 任务共享',
+  Gameplay: '玩法',
+  Hidden: '隐藏',
+  Network: '网络',
+};
+
+// com.fika.core.cfg 的键 → 中文名 + 简短说明（原版注释是英文的在这里补齐）
+const FIKA_CLIENT_CN = {
+  'Show Official Version': ['显示官方版本号', '显示原版版本号，而不是 Fika 版本号'],
+  'Developer Mode': ['开发者模式', '打开开发用的调试功能'],
+  'No AI': ['不刷 AI', '关闭 AI 生成（战局里没有 AI）'],
+  'No Loot': ['不刷物资', '关闭物资生成（适合跑图调试）'],
+  'Player Load Priority': ['玩家加载优先级', '加载其他玩家（以及作为客户端时的 AI）使用的线程优先级'],
+  'Max Bundle Lock': ['并行加载上限', '同时加载的资源包数量上限，加载 AI 慢时调大'],
+  'Auto Use Headless': ['自动使用无头主机', '有可用无头主机时自动连它'],
+  'Show Feed': ['显示击杀通知', '玩家死亡 / 撤离 / 击杀首领时弹出提示'],
+  'Auto Extract': ['自动撤离', '撤离倒计时结束后自动撤离（当主机时仅在无人连接时生效）'],
+  'Show Extract Message': ['显示撤离提示', '死亡 / 撤离后弹出提示'],
+  'Extract Key': ['撤离快捷键', '手动撤离使用的按键'],
+  'Show In-Game Player List': ['显示玩家列表', '是否显示局内玩家列表'],
+  'Enable Chat': ['启用聊天', '开启局内聊天（战局中不能修改）'],
+  'Chat Key': ['聊天快捷键', '打开聊天窗口的按键'],
+  'Enable Online Players': ['显示在线玩家', '主菜单显示在线玩家列表'],
+  'Online Players Scale': ['在线玩家窗口缩放', '显示在线玩家的窗口大小，显示比例不对时再调'],
+  'Free Camera Button': ['自由视角快捷键', '开启自由视角的按键'],
+  'AZERTY Mode': ['AZERTY 键盘', '自由视角使用 AZERTY 布局'],
+  'Drone Mode': ['无人机模式', '自由视角只能沿垂直轴移动'],
+  'Keybind Overlay': ['键位提示', '显示按键提示层'],
+  'Show Player Name Plates': ['显示队友名牌', '在队友头顶显示名字'],
+  'Hide Health Bar': ['隐藏血条', '完全隐藏玩家血条'],
+  'Show HP% instead of bar': ['用百分比代替血条', '显示血量数字而不是条'],
+  'Show Effects': ['显示状态效果', '在血条下方显示中毒 / 流血等效果'],
+  'Show Player Faction Icon': ['显示阵营图标', '在血条旁显示阵营图标'],
+  'Hide Name Plate in Optic': ['瞄具内隐藏名牌', '开镜瞄准时隐藏名牌'],
+  'Name Plates Use Optic Zoom': ['名牌跟随瞄具缩放', '用高倍镜时名牌也放大'],
+  'Decrease Opacity In Peripheral': ['余光降低透明度', '队友没看你时降低名牌透明度'],
+  'Name Plate Scale': ['名牌大小', '名牌的缩放比例'],
+  'Opacity in ADS': ['瞄准时透明度', '开镜时名牌的透明度'],
+  'Max Distance to Show': ['最大显示距离', '超过这个距离名牌消失（一半距离开始渐隐）'],
+  'Minimum Opacity': ['最低透明度', '名牌能显示的最低透明度'],
+  'Use Occlusion': ['遮挡隐藏', '看不见队友时隐藏名牌'],
+  'Full Health Color': ['满血颜色', '满血时血条颜色（RGBA 十六进制）'],
+  'Low Health Color': ['低血颜色', '低血量时血条颜色'],
+  'Name Plate Text Color': ['名牌文字颜色', '名牌上方文字的颜色'],
+  'Ping System': ['标记系统', '开启后可以按键在地图上打标记'],
+  'Ping Button': ['标记快捷键', '发送标记的按键'],
+  'Ping Color': ['标记颜色', '别人看到你标记的颜色'],
+  'Ping Size': ['标记大小', '标记的显示尺寸'],
+  'Ping Time': ['标记持续时间', '标记显示多少秒'],
+  'Play Ping Animation': ['标记手部动画', '标记时播放手部动画（可能影响操作）'],
+  'Show Ping During Optics': ['瞄具中显示标记', '开高倍镜时也显示标记'],
+  'Ping Use Optic Zoom': ['标记跟随瞄具缩放', '开镜时标记按倍率缩放'],
+  'Ping Scale With Distance': ['标记随距离缩放', '标记大小随距离变化'],
+  'Ping Minimum Opacity': ['标记最低透明度', '看向标记时最低透明度'],
+  'Show Ping Range': ['显示标记距离', '显示你和标记之间的距离'],
+  'Ping Sound': ['标记音效', '打标记时播放的音效名'],
+  'Quest Types': ['任务共享类型', '选择要收发哪些类型的任务；PlaceBeacon 包含标记和物品任务'],
+  'Show Notifications': ['显示任务通知', '共享任务进度时弹通知'],
+  'Easy Kill Conditions': ['宽松击杀条件', '队友满足条件击杀也算你的击杀'],
+  'Shared Kill Experience': ['共享击杀经验', '队友击杀（首领除外）你获得一半经验'],
+  'Shared Boss Experience': ['共享首领经验', '队友击杀首领你获得一半经验'],
+  'Disable Bot Metabolism': ['关闭 AI 新陈代谢', '防止 AI 在长局里饿死 / 渴死'],
+  'Last Version': ['上次加载版本', 'Fika 记录的上次加载版本，不用改'],
+  'Force IP': ['强制 IP', '主持时强制用这个 IP 广播，留空自动获取'],
+  'Force Bind IP': ['强制绑定网卡', '主持时用指定网卡，VPN 环境有用'],
+  'UDP Port': ['UDP 端口', '游戏数据包使用的端口'],
+  'Use UPnP': ['使用 UPnP', '自动开端口，路由器支持时有用'],
+  'Use NAT Punching': ['NAT 打洞', '主持战局时启用打洞（需要 Fullcone NAT）'],
+  'Use Fika NAT Punch Server': ['使用 Fika 打洞服务器', '使用公共 Fika 打洞服务器，需要先开上面的 NAT 打洞'],
+};
+
+const hasCJK = (s) => /[\u4e00-\u9fa5]/.test(String(s || ''));
 const deepEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 function flattenLeaves(obj, prefix = []) {
@@ -3127,7 +3326,9 @@ function fikaServerField(entry, edits) {
   const { path: pathArr, value } = entry;
   const keyPath = pathArr.join('.');
   const desc = FIKA_SERVER_DESC[keyPath] || '';
-  const label = pathArr.slice(1).length ? pathArr.slice(1).join(' · ') : pathArr[0];
+  const rawLabel = pathArr.slice(1).length ? pathArr.slice(1).join(' · ') : pathArr[0];
+  const cn = FIKA_SERVER_CN[keyPath];
+  const label = cn || rawLabel;
   let node;
   let read;
   if (typeof value === 'boolean') {
@@ -3156,7 +3357,7 @@ function fikaServerField(entry, edits) {
   }
   edits.push({ path: pathArr, original: value, read, keyPath });
   return h('div', { class: 'field' },
-    h('label', { title: desc || keyPath }, label),
+    h('label', { title: `${keyPath}${desc ? '：' + desc : ''}` }, label),
     node,
     desc ? h('div', { class: 'hint' }, desc) : null);
 }
@@ -3165,7 +3366,10 @@ function fikaClientField(item, sectionName, edits) {
   const type = String(item.type || 'String');
   const t = type.toLowerCase();
   const raw = String(item.value ?? '');
-  const desc = (item.desc || '').replace(/\n+/g, ' ');
+  const rawDesc = String(item.desc || '').replace(/\n+/g, ' ').trim();
+  const cnPair = FIKA_CLIENT_CN[item.key];
+  const label = cnPair ? cnPair[0] : item.key;
+  const desc = (cnPair && cnPair[1]) || (hasCJK(rawDesc) ? rawDesc : '') || rawDesc;
   let node;
   let read;
   if (t === 'boolean') {
@@ -3192,7 +3396,7 @@ function fikaClientField(item, sectionName, edits) {
   }
   edits.push({ section: sectionName, key: item.key, original: raw, read });
   return h('div', { class: 'field' },
-    h('label', { title: desc || item.key }, item.key),
+    h('label', { title: `${item.key}${desc ? '：' + desc : ''}` }, label),
     node,
     desc ? h('div', { class: 'hint', style: 'max-width:340px' }, desc.length > 150 ? desc.slice(0, 150) + '…' : desc) : null);
 }
@@ -3224,10 +3428,11 @@ async function renderFika() {
   const serverEdits = [];
   const serverGroups = Object.entries(serverCfg).map(([group, val]) => {
     const leaves = isPlainObject(val) ? flattenLeaves(val, [group]) : [{ path: [group], value: val }];
+    const groupCn = FIKA_GROUP_CN[group];
     return h('div', { class: 'card', style: 'margin-top:12px' },
       h('div', { class: 'card-head' },
-        h('h2', { style: 'font-size:14px' }, group),
-        h('span', { class: 'sub' }, `${leaves.length} 项`)),
+        h('h2', { style: 'font-size:14px', title: group }, groupCn || group),
+        h('span', { class: 'sub' }, `${groupCn ? group + ' · ' : ''}${leaves.length} 项`)),
       h('div', { class: 'fika-fields' }, ...leaves.map((e) => fikaServerField(e, serverEdits))));
   });
 
@@ -3262,9 +3467,13 @@ async function renderFika() {
 
   // 客户端配置（com.fika.core.cfg）
   const clientEdits = [];
-  const clientCards = clientSections.map((sec) => h('details', { class: 'acc' },
-    h('summary', {}, h('b', {}, sec.name || '（未命名段）'), h('span', { class: 'sub' }, `${sec.items.length} 项`)),
-    h('div', { class: 'fika-fields', style: 'margin-top:12px' }, ...sec.items.map((it) => fikaClientField(it, sec.name, clientEdits)))));
+  const clientCards = clientSections.map((sec) => {
+    const secCn = FIKA_CLIENT_SECTION_CN[sec.name];
+    return h('details', { class: 'acc' },
+      h('summary', {}, h('b', { title: sec.name || '' }, secCn || sec.name || '（未命名段）'),
+        h('span', { class: 'sub' }, `${secCn ? sec.name + ' · ' : ''}${sec.items.length} 项`)),
+      h('div', { class: 'fika-fields', style: 'margin-top:12px' }, ...sec.items.map((it) => fikaClientField(it, sec.name, clientEdits))));
+  });
   const saveClient = h('button', { class: 'btn primary', onclick: async (e) => {
     e.target.disabled = true;
     try {
@@ -3902,7 +4111,7 @@ async function buffEditorCard() {
     });
     tableBox.replaceChildren(
       h('div', { class: 'table-wrap' }, h('table', {},
-        h('thead', {}, h('tr', {}, ['BuffType', '触发概率', '延迟（秒）', '持续（秒）', '数值', '技能', '绝对值'].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ['类型（BuffType）', '触发概率', '延迟（秒）', '持续（秒）', '数值', '技能', '绝对值'].map((t) => h('th', {}, t)))),
         h('tbody', {}, ...rows))),
       h('div', { class: 'hint', style: 'margin-top:8px' }, '这一组是服务端下发的效果定义，物品通过 StimulatorBuffs 指向它。'));
   };

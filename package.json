@@ -1,6 +1,6 @@
 {
   "name": "spt-manager",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "SPT 4.x 本地模组管理器：模组安装、服务端与客户端启动、Fika 联机",
   "type": "module",
