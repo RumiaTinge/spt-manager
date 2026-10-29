@@ -3037,7 +3037,7 @@ async function renderAbout() {
     h('div', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, '版本信息')),
       h('dl', { class: 'kv' },
-        h('dt', {}, '管理器'), h('dd', {}, '1.0.3'),
+        h('dt', {}, '管理器'), h('dd', {}, '1.0.4'),
         h('dt', {}, 'SPT'), h('dd', {}, v.spt || '未知'),
         h('dt', {}, 'Tarkov'), h('dd', {}, v.tarkov || '未知'),
         h('dt', {}, '运行方式'), h('dd', {}, bundled.embedded ? '单文件 exe（内置资源）' : '源码（node server.js）'),
