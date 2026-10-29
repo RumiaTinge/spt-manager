@@ -368,3 +368,10 @@ td.actions .btn + .btn { margin-left: 6px; }
 .tl-legend .tl-lg-pmc { background: #fff5e5; color: #9a6512; }
 .tl-legend .tl-lg-boss { background: #fdecec; color: #a72c2c; }
 .tl-track { min-height: 26px; }
+/* ---- 节日 / 季节性活动（服务器页） ---- */
+.seasonal-ev { border-top: 1px dashed var(--line); padding: 14px 0 4px; display: flex; flex-direction: column; gap: 8px; }
+.seasonal-ev:first-of-type { border-top: 0; padding-top: 4px; }
+.seasonal-nested { grid-column: 1 / -1; background: #fafbfe; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.seasonal-nested .field label { font-size: 12px; }
+.grid.c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) { .grid.c3, .grid.c4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

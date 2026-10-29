@@ -248,6 +248,20 @@ exe 里已经带了四样东西，换电脑、重装、带朋友入门都不用�
 
 命令行 / 接口：`GET /api/items?q=&limit=`、`GET /api/items/:id`、`POST /api/items/:id {"patch":{...}}`、`GET /api/buffs`、`POST /api/buffs/:id {"entries":[...]}`、`GET /api/items/backups`、`POST /api/items/restore {"name":...}`。
 
+## 节日 / 季节性活动
+
+服务器页最下面的「节日 / 季节性活动」卡片读写 SPT_Data\configs\seasonalevents.json（万圣节 / 圣诞 / 新年 / 圣诞延长 / 愚人节）。
+
+- **全局开关**：enableSeasonalEventDetection，关掉后服务端不再按日期套用任何节日活动。
+- **每个活动**：名称、启用、开始/结束的月日（例如 10/28 ~ 11/9，支持跨年），以及该活动自己的 settings。
+- **设置项按类型渲染**：布尔是开关、数字是输入框（小数用 0.01 步进，比如 christmasLootBoostAmount: 0.03）、字符串是文本框、数组用逗号分隔、嵌套对象展开成子块；orceSeason 是季节下拉，zombieSettings 会显示每张图的感染百分比网格。
+- **保存**：写前备份到 data\backups\configs\seasonalevents.json.<时间戳>.bak；只回写页面上出现的字段，其余原样保留；月/日沿用原文件里的字符串类型（SPT 按字符串反序列化）。
+- **生效**：改完要重启服务端。卡片上的「今天生效 / 还有 N 天…」按游戏内月日判断。
+
+> 下雪、季节切换由 SPT_Data\configs\weather.json 的 seasonDates 决定，本页不编辑它；节日活动是否真的套用还取决于上面那个全局开关和活动自己的「启用」。
+
+接口：GET /api/seasonal 读取，POST /api/seasonal（body {enableSeasonalEventDetection, events}）保存。
+
 ## 实时窗口
 
 「实时窗口」页把三个窗口分开显示，不用再在任务栏里翻：

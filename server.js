@@ -21,6 +21,7 @@ import { listArchive, analyzePackage, extractToTemp, installFromTemp } from './l
 import * as forge from './lib/forge.js';
 import * as game from './lib/game.js';
 import * as aiRules from './lib/aiRules.js';
+import * as seasonal from './lib/seasonal.js';
 import * as fika from './lib/fika.js';
 import * as launch from './lib/launch.js';
 import * as pack from './lib/pack.js';
@@ -579,6 +580,19 @@ route('POST', /^\/api\/ai\/rules\/restore$/, async (ctx) => {
   const root = requireRoot();
   const { name } = await readJsonBody(ctx.req);
   const r = aiRules.restoreBackup(root, name);
+  return { ok: true, ...r };
+});
+
+// ---- 节日 / 季节性活动（SPT_Data\configs\seasonalevents.json）
+route('GET', /^\/api\/seasonal$/, async () => {
+  const root = requireRoot();
+  return { ok: true, ...seasonal.readSeasonal(root) };
+});
+
+route('POST', /^\/api\/seasonal$/, async (ctx) => {
+  const root = requireRoot();
+  const body = await readJsonBody(ctx.req);
+  const r = seasonal.writeSeasonal(root, body || {});
   return { ok: true, ...r };
 });
 

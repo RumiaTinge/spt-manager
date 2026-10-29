@@ -802,9 +802,162 @@ async function openMarketDetail(m, sptVersion) {
 }
 
 // ---------------------------------------------------------------- 服务器
+const SEASONAL_MAP_CN = {
+  bigmap: '海关', woods: '森林', shoreline: '海岸线', interchange: '立交桥',
+  laboratory: '实验室', lighthouse: '灯塔', rezervbase: '储备站', factory4: '工厂',
+  tarkovstreets: '塔科夫街区', sandbox: '中心区',
+};
+const SEASON_CN = { 0: '夏天', 1: '秋天', 2: '冬天', 3: '春天', 4: '深秋', 5: '早春' };
+
+/** 节日 / 季节性活动卡片（seasonalevents.json） */
+function seasonalCard(s) {
+  const bit = (label, get, set) => {
+    const inp = h('input', { type: 'checkbox', checked: !!get() });
+    inp.addEventListener('change', () => set(inp.checked));
+    return h('label', { class: 'switch' }, inp, label);
+  };
+  const numInp = (value, lo, hi, onchange, width = '64px') => {
+    const inp = h('input', { class: 'input', type: 'number', min: String(lo), max: String(hi), value: String(value), style: `width:${width}` });
+    inp.addEventListener('change', () => {
+      const n = Number(inp.value);
+      const v = Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : value;
+      inp.value = String(v);
+      onchange(v);
+    });
+    return inp;
+  };
+  const textInp = (value, onchange, opts = {}) => {
+    const inp = h('input', { class: 'input', value: String(value ?? ''), placeholder: opts.placeholder || '', style: opts.style || '' });
+    inp.addEventListener('change', () => onchange(inp.value));
+    return inp;
+  };
+  const stateTag = (ev) => {
+    const active = s.active.includes(ev.name);
+    const nx = ev.next;
+    const tip = nx ? (nx.kind === 'end' ? `还有 ${nx.days} 天结束（${nx.date}）` : `还有 ${nx.days} 天开始（${nx.date}）`) : '';
+    return h('span', { class: `tag ${active ? 'ok' : ''}`, title: tip }, active ? `今天生效${tip ? ` · ${tip}` : ''}` : `未生效${tip ? ` · ${tip}` : ''}`);
+  };
+
+  // 通用：按值类型渲染设置项（支持一层嵌套对象，例如 zombieSettings.mapInfectionAmount）
+  const renderSetting = (key, val, holder, label) => {
+    if (typeof val === 'boolean') return bit(label || key, () => holder[key], (v) => { holder[key] = v; });
+    if (typeof val === 'number') {
+      const isInt = Number.isInteger(val);
+      const inp = h('input', {
+        class: 'input', type: 'number',
+        step: isInt ? '1' : '0.01',
+        min: '0', max: isInt ? '100' : '10',
+        value: String(val), style: isInt ? 'width:90px' : 'width:110px',
+      });
+      inp.addEventListener('change', () => {
+        const n = Number(inp.value);
+        holder[key] = Number.isFinite(n) ? (isInt ? Math.max(0, Math.round(n)) : Math.max(0, n)) : val;
+      });
+      return inp;
+    }
+    if (Array.isArray(val)) {
+      return textInp(val.join(', '), (v) => {
+        holder[key] = v.split(',').map((x) => x.trim()).filter(Boolean);
+      }, { placeholder: '逗号分隔', style: 'min-width:220px' });
+    }
+    if (val && typeof val === 'object') {
+      const rows = Object.entries(val).map(([k, v]) => {
+        const label2 = key === 'mapInfectionAmount' ? (SEASONAL_MAP_CN[k.toLowerCase()] || k) : k;
+        return h('div', { class: 'field' }, h('label', {}, label2), renderSetting(k, v, val, label2));
+      });
+      return h('div', { class: 'seasonal-nested' }, h('div', { class: 'hint' }, key), h('div', { class: 'grid c3' }, ...rows));
+    }
+    return textInp(val, (v) => { holder[key] = v; });
+  };
+
+  const eventBoxes = s.events.map((ev) => {
+    const top = h('div', { class: 'row', style: 'gap:10px;align-items:center;flex-wrap:wrap' },
+      h('span', { class: 'tag' }, ev.type || '活动'),
+      textInp(ev.name, (v) => { ev.name = v; }, { style: 'width:200px' }),
+      bit('启用', () => ev.enabled, (v) => { ev.enabled = v; }),
+      stateTag(ev));
+    const dateRow = h('div', { class: 'row', style: 'gap:6px;align-items:center;flex-wrap:wrap' },
+      h('span', { class: 'hint' }, '开始'),
+      numInp(ev.startMonth, 1, 12, (v) => { ev.startMonth = v; }), h('span', {}, '月'),
+      numInp(ev.startDay, 1, 31, (v) => { ev.startDay = v; }), h('span', {}, '日'),
+      h('span', { class: 'hint', style: 'margin-left:10px' }, '结束'),
+      numInp(ev.endMonth, 1, 12, (v) => { ev.endMonth = v; }), h('span', {}, '月'),
+      numInp(ev.endDay, 1, 31, (v) => { ev.endDay = v; }), h('span', {}, '日'),
+      h('span', { class: 'hint', style: 'margin-left:8px' }, '（月/日按游戏内日历判断，支持跨年）'));
+    const settingsRows = Object.entries(ev.settings || {}).map(([k, v]) => {
+      if (k === 'zombieSettings' && v && typeof v === 'object') {
+        const inner = Object.entries(v).map(([k2, v2]) => {
+          if (k2 === 'mapInfectionAmount' && v2 && typeof v2 === 'object') {
+            const maps = Object.entries(v2).map(([mk, mv]) => h('div', { class: 'field' },
+              h('label', {}, SEASONAL_MAP_CN[mk.toLowerCase()] || mk),
+              numInp(mv, 0, 100, (n) => { v2[mk] = n; }, '90px')));
+            return h('div', { style: 'grid-column:1/-1' }, h('div', { class: 'hint' }, '感染度按地图（%）'), h('div', { class: 'grid c4' }, ...maps));
+          }
+          return h('div', { class: 'field' }, h('label', {}, k2), renderSetting(k2, v2, v, k2));
+        });
+        return h('div', { style: 'grid-column:1/-1;border-top:1px dashed var(--line);padding-top:10px' },
+          h('div', { class: 'hint', style: 'margin-bottom:8px' }, '僵尸 / 感染'),
+          h('div', { class: 'grid c3' }, ...inner));
+      }
+      if (k === 'forceSeason' && typeof v === 'number') {
+        const sel = h('select', { class: 'input' }, ...Object.entries(SEASON_CN).map(([k2, label]) =>
+          h('option', { value: k2, selected: String(v) === k2 }, `${label}（${k2}）`)));
+        sel.addEventListener('change', () => { ev.settings[k] = Number(sel.value); });
+        return h('div', { class: 'field' }, h('label', {}, '强制季节'), sel);
+      }
+      return h('div', { class: 'field' }, h('label', {}, k), renderSetting(k, v, ev.settings, k));
+    });
+
+    return h('div', { class: 'seasonal-ev' },
+      top, dateRow,
+      h('div', { class: 'grid c3', style: 'margin-top:12px' }, ...settingsRows));
+  });
+
+  const saveBtn = h('button', { class: 'btn primary', onclick: async (e) => {
+    e.target.disabled = true;
+    try {
+      const body = { enableSeasonalEventDetection: s.enableSeasonalEventDetection, events: s.events };
+      const r = await POST('/api/seasonal', body);
+      if (r.ok === false) { toast(r.error || '保存失败', 'err'); return; }
+      toast('节日配置已保存（重启服务端后生效）', 'ok');
+      await render();
+    } catch (err) { toast(String(err.message || err), 'err'); }
+    finally { e.target.disabled = false; }
+  } }, '保存节日配置');
+
+  const head = h('div', { class: 'card-head' },
+    h('h2', {}, '节日 / 季节性活动'),
+    h('span', { class: 'sub' }, s.path || 'SPT_Data\\configs\\seasonalevents.json'));
+
+  const intro = h('div', { class: 'hint', style: 'margin-bottom:10px' },
+    `服务端按「今天的月/日」判断哪个活动生效。今天 ${s.today.month} 月 ${s.today.day} 日，生效中：${s.active.length ? s.active.join('、') : '无'}。`
+    + '改完需要重启服务端；只有开着的活动才会套用下面这些开关。');
+
+  const globalRow = h('div', { class: 'row', style: 'gap:14px;align-items:center;flex-wrap:wrap' },
+    bit('启用季节活动检测（enableSeasonalEventDetection）', () => s.enableSeasonalEventDetection, (v) => { s.enableSeasonalEventDetection = v; }),
+    h('span', { class: 'hint' }, '关掉后服务端不会再自动套用任何节日活动（万圣节/圣诞都不生效）'),
+    saveBtn);
+
+  const info = s.info ? h('div', { class: 'hint', style: 'margin-top:12px;line-height:1.9' },
+    `随附数据：首领刷新 ${s.info.eventBossSpawns.length} 组（${s.info.eventBossSpawns.join('、') || '无'}）；`
+    + `装备 ${s.info.eventGear.join('、') || '无'}；战利品 ${s.info.eventLoot.join('、') || '无'}；`
+    + `礼物刷新点 ${s.info.gifterMaps} 张图；圣诞容器 ${s.info.christmasContainers} 个；`
+    + `Khorovod 可传送地图 ${s.info.khorovodMaps.length} 张；敌对表 ${s.info.hostilityFor.join('、') || '无'}。`
+    + '（这些表本身在同一个 JSON 里，这里只读展示）') : null;
+
+  return h('div', { class: 'card' },
+    head, intro, globalRow,
+    h('div', { style: 'height:14px' }),
+    ...eventBoxes,
+    info,
+    h('div', { class: 'hint', style: 'margin-top:10px' }, '冬季下雪/季节贴图由 weather.json 的 seasonDates 控制，不在这张卡里。'));
+}
+
 async function renderServer() {
   if (!state.app || !state.app.autoRoot) return frag(pageHead('服务器'), noRootCard());
   const st = await GET('/api/server/status');
+  let season = null;
+  try { season = await GET('/api/seasonal'); } catch { /* 老版本后端没有这个接口 */ }
   const logBox = makeLogBox('加载日志…');
 
   async function loadLog() {
@@ -854,6 +1007,10 @@ async function renderServer() {
     h('div', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, '服务端日志'), h('span', { class: 'sub' }, 'data/server.log')),
       logBox._wrap),
+    season ? h('div', { style: 'height:16px' }) : null,
+    season && season.ok ? seasonalCard(season)
+      : (season ? h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', {}, '节日 / 季节性活动')),
+        h('div', { class: 'empty' }, h('b', {}, '读取失败'), season.parseError || '没有找到 seasonalevents.json')) : null),
   );
 }
 
@@ -1720,7 +1877,8 @@ function renderAiRulesSection(aiData, rulesData) {
       return typeof v === 'boolean' ? v : fallback;
     };
 
-    const period = Math.max(1, num('botSpawnPeriodCheck', d.botSpawnPeriodCheck || 15));
+    // 客户端会把这个间隔夹到 ≥10 秒（NonWavesSpawnScenario.Update 里的 ldc.r4 10）
+    const period = Math.max(10, num('botSpawnPeriodCheck', d.botSpawnPeriodCheck || 15));
     const onMin = Math.max(0, num('botSpawnTimeOnMin', d.botSpawnTimeOnMin || 0));
     const onMax = Math.max(onMin, num('botSpawnTimeOnMax', d.botSpawnTimeOnMax || onMin));
     const offMin = Math.max(0, num('botSpawnTimeOffMin', d.botSpawnTimeOffMin || 0));
@@ -1729,6 +1887,8 @@ function renderAiRulesSection(aiData, rulesData) {
     const stop = Math.max(start, num('botStop', d.botStop || 1500));
     const step = Math.max(1, num('botSpawnCountStep', d.botSpawnCountStep || 4));
     const perZone = num('maxBotPerZone', d.maxBotPerZone || 0);
+    const botMaxRaw = num('botMax', d.botMax || 0);
+    const botMax = Number.isFinite(botMaxRaw) && botMaxRaw > 0 ? botMaxRaw : (d.botMax || 0);
     const capBase = data.cap;
     const capScale = rule.actions.botCapScale !== undefined ? Number(rule.actions.botCapScale) : 1;
     const cap = Number.isFinite(capBase) && Number.isFinite(capScale) ? Math.round(capBase * capScale) : capBase;
@@ -1775,22 +1935,23 @@ function renderAiRulesSection(aiData, rulesData) {
       oldNodes.push(h('span', { class: 'tl-note' }, `${waves.length} 条 wave · 合计 ${minSum}~${maxSum} 只`));
     }
 
-    // 新系统：周期性「刷怪窗口」，窗口内每 period 秒检查一次，每次最多 +step 只
+    // 新系统：周期性「刷怪窗口」，窗口内每 period 秒检查一次；每次检查的名额 = BotMax − 当前存活
+    // （BotSpawnCountStep 不是每次数量，只在「已满员」后决定要剩几个名额才恢复刷）
     const newNodes = [];
     let winCount = 0;
-    let perWin = 0;
+    let checksPerWin = 0;
     if (!newOn) {
       newNodes.push(h('span', { class: 'tl-note' }, '新系统已关闭：只有旧系统的 waves 会刷人'));
     } else {
       const onAvg = Math.max(1, (onMin + onMax) / 2);
       const offAvg = Math.max(0, (offMin + offMax) / 2);
-      perWin = Math.max(1, Math.floor(onAvg / period) * step);
+      checksPerWin = Math.max(1, Math.floor(onAvg / period));
       let t = start;
       while (t < stop && winCount < 80) {
         const end = Math.min(stop, t + onAvg);
         newNodes.push(h('div', {
           class: 'tl-span tl-new' + (cap === 0 ? ' tl-off' : ''), style: `left:${pct(t)};width:${widthPct(t, end)}`,
-          title: `刷怪窗口 ${fmtSec(t)} ~ ${fmtSec(end)} · 每 ${period}s 检查一次 · 每次最多 +${step} 只`,
+          title: `刷怪窗口 ${fmtSec(t)} ~ ${fmtSec(end)} · 每 ${period}s 检查一次 · 每次按「BotMax − 当前存活」补人`,
         }));
         winCount++;
         const next = end + offAvg;
@@ -1801,7 +1962,8 @@ function renderAiRulesSection(aiData, rulesData) {
           `没有刷怪窗口：BotStart ${fmtSec(start)} ≥ BotStop ${fmtSec(stop)}（或停歇时间把窗口全挤掉了）`));
       } else {
         newNodes.push(h('span', { class: 'tl-note' },
-          `${winCount} 个窗口 · 每窗口约 +${perWin} 只${perZone ? ` · 单区域上限 ${perZone}` : ''}${capBase !== undefined ? ` · 同屏上限 ${capText}` : ''}`));
+          `${winCount} 个窗口 · 每窗口最多 ${checksPerWin} 次检查 · 每次补到 BotMax ${botMax || '?'}（不是固定 +${step}）`
+          + `${perZone ? ` · 单区域上限 ${perZone}` : ''}${capBase !== undefined ? ` · 同屏上限 ${capText}` : ''}`));
       }
     }
 
